@@ -39,6 +39,7 @@ export interface CreateStaffPayload {
   documentId?: string
   phone?: string
   email?: string
+  avatarUrl?: string
   role: StaffRoleFormValue
   notes?: string
 }
@@ -54,6 +55,7 @@ const schema = z.object({
   documentId: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email("Enter a valid email").or(z.literal("")),
+  avatarUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   role: z.enum(["STAFF", "SECURITY", "LOGISTICS", "CLEANING", "REFEREE", "MEDIC", "PRODUCTION", "TICKETING", "OTHER"]),
   notes: z.string().optional(),
 })
@@ -66,6 +68,7 @@ export function CreateStaffDialog({ open, onOpenChange, onCreate }: CreateStaffD
       documentId: "",
       phone: "",
       email: "",
+      avatarUrl: "",
       role: "STAFF",
       notes: "",
     },
@@ -78,6 +81,7 @@ export function CreateStaffDialog({ open, onOpenChange, onCreate }: CreateStaffD
         documentId: "",
         phone: "",
         email: "",
+        avatarUrl: "",
         role: "STAFF",
         notes: "",
       })
@@ -92,6 +96,7 @@ export function CreateStaffDialog({ open, onOpenChange, onCreate }: CreateStaffD
       documentId: data.documentId || undefined,
       phone: data.phone || undefined,
       email: data.email || undefined,
+      avatarUrl: data.avatarUrl || undefined,
       notes: data.notes || undefined,
     })
     onOpenChange(false)
@@ -147,6 +152,16 @@ export function CreateStaffDialog({ open, onOpenChange, onCreate }: CreateStaffD
             </div>
 
             <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-200">Photo URL</label>
+              <Input
+                {...form.register("avatarUrl")}
+                placeholder="https://..."
+                className="bg-[#1A1A1F] border-[#2B2B30]"
+              />
+              <p className="text-xs text-gray-500">Optional. Paste a URL for the staff member photo.</p>
+            </div>
+
+            <div className="space-y-2">
               <label className="text-sm font-medium text-gray-200">Role</label>
               <Select
                 value={form.watch("role")}
@@ -182,7 +197,7 @@ export function CreateStaffDialog({ open, onOpenChange, onCreate }: CreateStaffD
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
 
           <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
+            These changes update local mock data only. Later this will call the real SNP backend.
           </p>
 
           <DialogFooter>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Handshake, Globe, Instagram, Plus } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { CreateBrandDialog, type CreateBrandPayload } from "@/components/partners/create-brand-dialog"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   CreatePartnershipDialog,
   type CreatePartnershipPayload,
@@ -15,6 +16,7 @@ import {
 interface BrandItem {
   id: string
   name: string
+  logoUrl?: string
   website?: string
   instagram?: string
   contactName?: string
@@ -40,6 +42,7 @@ const initialBrands: BrandItem[] = [
   {
     id: "br-1",
     name: "ADCC",
+    logoUrl: "https://upload.wikimedia.org/wikipedia/en/thumb/6/67/ADCC_logo.svg/256px-ADCC_logo.svg.png",
     website: "https://adcc.com",
     instagram: "@adccofficial",
     isPartner: true,
@@ -48,6 +51,7 @@ const initialBrands: BrandItem[] = [
   {
     id: "br-2",
     name: "Braus",
+    logoUrl: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=200&q=80",
     website: "https://braus.com",
     instagram: "@brausfightwear",
     isPartner: false,
@@ -118,6 +122,7 @@ export default function PartnersPage() {
     const nextBrand: BrandItem = {
       id: `br-${Date.now()}`,
       name: payload.name,
+      logoUrl: payload.logoUrl,
       website: payload.websiteUrl,
       instagram: payload.instagramUrl,
       contactName: payload.contactName,
@@ -194,8 +199,12 @@ export default function PartnersPage() {
               className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors"
             >
               <div className="flex items-start justify-between mb-4">
-                <div className="w-16 h-16 rounded-lg bg-[#1A1A1F] flex items-center justify-center text-2xl font-bold text-white">
-                  {brand.name.charAt(0)}
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10 rounded-none bg-transparent">
+                    {brand.logoUrl && <AvatarImage src={brand.logoUrl} alt={brand.name} />}
+                    <AvatarFallback>{brand.name.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <h3 className="text-lg font-semibold text-white">{brand.name}</h3>
                 </div>
                 <div className="flex gap-2">
                   {brand.isPartner && (
@@ -206,8 +215,6 @@ export default function PartnersPage() {
                   )}
                 </div>
               </div>
-
-              <h3 className="text-lg font-semibold text-white mb-4">{brand.name}</h3>
 
               <div className="flex items-center gap-4">
                 {brand.website && (

@@ -21,10 +21,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 // Mock data for development
 const mockUser: User = {
-  id: '1',
-  email: 'admin@snp.com',
-  name: 'Admin SNP',
-  avatar: 'https://image2url.com/r2/default/images/1770091475761-fe318971-6ba3-4ef4-87e0-f2d8186fc541.png',
+  id: 'user_1',
+  email: 'turco@snp.local',
+  name: 'Gonza Turco',
+  avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+  avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
   memberships: [
     { orgId: 'org-1', orgName: 'Santo Negro Producciones', role: 'admin' },
     { orgId: 'org-2', orgName: 'BJJ Events Chile', role: 'member' },

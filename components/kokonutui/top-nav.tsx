@@ -7,17 +7,18 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import Image from "next/image"
 import { Bell, ChevronRight, Building2, Calendar, Check, ChevronDown } from "lucide-react"
 import Profile01 from "./profile-01"
 import Link from "next/link"
 import { ThemeToggle } from "../theme-toggle"
 import { useAuth } from "@/lib/context/auth-context"
 import { usePathname } from "next/navigation"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function TopNav() {
-  const { currentOrg, currentEvent, organizations, events, setCurrentOrg, setCurrentEvent } = useAuth()
+  const { user, currentOrg, currentEvent, organizations, events, setCurrentOrg, setCurrentEvent } = useAuth()
   const pathname = usePathname()
+  const avatarSrc = user?.avatarUrl || user?.avatar
 
   // Generate breadcrumbs based on pathname
   const getBreadcrumbs = () => {
@@ -133,20 +134,17 @@ export default function TopNav() {
 
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
-            <Image
-              src="https://ferf1mheo22r9ira.public.blob.vercel-storage.com/avatar-01-n0x8HFv8EUetf9z6ht0wScJKoTHqf8.png"
-              alt="User avatar"
-              width={28}
-              height={28}
-              className="rounded-full ring-2 ring-gray-200 dark:ring-[#2B2B30] sm:w-8 sm:h-8 cursor-pointer"
-            />
+            <Avatar className="h-8 w-8 cursor-pointer ring-2 ring-gray-200 dark:ring-[#2B2B30]">
+              {avatarSrc && <AvatarImage src={avatarSrc} alt={user?.name ?? "User"} />}
+              <AvatarFallback>{user?.name?.charAt(0) ?? "U"}</AvatarFallback>
+            </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
             sideOffset={8}
             className="w-[280px] sm:w-80 bg-background border-border rounded-lg shadow-lg"
           >
-            <Profile01 avatar="https://ferf1mheo22r9ira.public.blob.vercel-storage.com/avatar-01-n0x8HFv8EUetf9z6ht0wScJKoTHqf8.png" />
+            <Profile01 avatar={avatarSrc} />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

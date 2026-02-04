@@ -12,12 +12,14 @@ import {
   CreateSponsorshipDialog,
   type CreateSponsorshipPayload,
 } from "@/components/sponsors/create-sponsorship-dialog"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 type SponsorshipTier = "TITLE" | "GOLD" | "SILVER" | "BRONZE" | "SUPPORT"
 
 interface BrandItem {
   id: string
   name: string
+  logoUrl?: string
 }
 
 interface SponsorshipItem {
@@ -27,6 +29,7 @@ interface SponsorshipItem {
   brandName: string
   tier: SponsorshipTier
   status: "PROPOSED" | "NEGOTIATION" | "CONFIRMED" | "CANCELED"
+  imageUrl?: string
   cashValue?: number
   inKindValue?: number
   benefits: string
@@ -49,12 +52,23 @@ const initialSponsorships: SponsorshipItem[] = Object.entries(mockSponsorsByTier
     brandName: sponsor.brandName,
     tier: tierMapFromMock[tierKey as keyof typeof tierMapFromMock],
     status: "CONFIRMED" as const,
+    imageUrl: undefined,
     benefits: "Existing sponsorship package",
   }))
 )
 
 const initialBrands: BrandItem[] = Array.from(
-  new Map(initialSponsorships.map((item) => [item.brandId, { id: item.brandId, name: item.brandName }])).values()
+  new Map(
+    initialSponsorships.map((item) => {
+      const sponsorWithLogo = Object.values(mockSponsorsByTier)
+        .flat()
+        .find((sponsor) => sponsor.brandId === item.brandId)
+      return [
+        item.brandId,
+        { id: item.brandId, name: item.brandName, logoUrl: sponsorWithLogo?.logo || undefined },
+      ] as const
+    })
+  ).values()
 )
 
 const tierOrder: SponsorshipTier[] = ["TITLE", "GOLD", "SILVER", "BRONZE", "SUPPORT"]
@@ -98,6 +112,7 @@ export default function SponsorsPage() {
       brandName: selectedBrand?.name ?? "Unknown brand",
       tier: payload.tier,
       status: payload.status,
+      imageUrl: payload.imageUrl,
       cashValue: payload.cashValue,
       inKindValue: payload.inKindValue,
       benefits: payload.benefits,
@@ -211,13 +226,34 @@ export default function SponsorsPage() {
                     {tierSponsors.map((sponsorship) => (
                       <div
                         key={sponsorship.id}
-                        className="bg-[#1A1A1F] rounded-lg p-4 border border-[#2B2B30] hover:border-[#3B3B40] transition-colors min-w-[130px] text-center"
+                        className="bg-[#1A1A1F] rounded-lg p-4 border border-[#2B2B30] hover:border-[#3B3B40] transition-colors min-w-[220px]"
                       >
-                        <div className="w-12 h-12 rounded-lg bg-[#252529] flex items-center justify-center text-lg font-bold text-white mx-auto mb-2">
-                          {sponsorship.brandName.charAt(0)}
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 rounded-none bg-transparent">
+                            <AvatarImage
+                              src={brands.find((brand) => brand.id === sponsorship.brandId)?.logoUrl}
+                              alt={sponsorship.brandName}
+                            />
+                            <AvatarFallback>{sponsorship.brandName.charAt(0)}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-medium text-white">{sponsorship.brandName}</p>
+                            <p className="text-xs text-gray-500">{sponsorship.status}</p>
+                          </div>
                         </div>
-                        <p className="text-sm text-white font-medium">{sponsorship.brandName}</p>
-                        <p className="text-xs text-gray-500 mt-1">{sponsorship.status}</p>
+                        {sponsorship.imageUrl && (
+                          <img
+                            src={sponsorship.imageUrl}
+                            alt={`${sponsorship.brandName} event banner`}
+                            className="mt-3 h-12 w-full rounded-md object-cover"
+                          />
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
+                          {typeof sponsorship.cashValue === "number" && <span>Cash: ${sponsorship.cashValue.toLocaleString()}</span>}
+                          {typeof sponsorship.inKindValue === "number" && (
+                            <span>In-kind: ${sponsorship.inKindValue.toLocaleString()}</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

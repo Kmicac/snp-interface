@@ -38,6 +38,7 @@ export interface CreateSponsorshipPayload {
   brandId: string
   tier: "TITLE" | "GOLD" | "SILVER" | "BRONZE" | "SUPPORT"
   status: "PROPOSED" | "NEGOTIATION" | "CONFIRMED" | "CANCELED"
+  imageUrl?: string
   cashValue?: number
   inKindValue?: number
   benefits: string
@@ -58,6 +59,7 @@ const schema = z.object({
   brandId: z.string().min(1, "Brand is required"),
   tier: z.enum(["TITLE", "GOLD", "SILVER", "BRONZE", "SUPPORT"]),
   status: z.enum(["PROPOSED", "NEGOTIATION", "CONFIRMED", "CANCELED"]),
+  imageUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   cashValue: z.number().min(0).optional(),
   inKindValue: z.number().min(0).optional(),
   benefits: z.string().trim().min(4, "Benefits are required"),
@@ -79,6 +81,7 @@ export function CreateSponsorshipDialog({
       brandId: brands[0]?.id || "",
       tier: "GOLD",
       status: "PROPOSED",
+      imageUrl: "",
       cashValue: undefined,
       inKindValue: undefined,
       benefits: "",
@@ -93,6 +96,7 @@ export function CreateSponsorshipDialog({
         brandId: brands[0]?.id || "",
         tier: "GOLD",
         status: "PROPOSED",
+        imageUrl: "",
         cashValue: undefined,
         inKindValue: undefined,
         benefits: "",
@@ -106,6 +110,7 @@ export function CreateSponsorshipDialog({
   const handleSubmit = form.handleSubmit((data) => {
     onCreate({
       ...data,
+      imageUrl: data.imageUrl || undefined,
       notes: data.notes || undefined,
     })
     onOpenChange(false)
@@ -202,6 +207,16 @@ export function CreateSponsorshipDialog({
               </Select>
             </div>
 
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-gray-200">Event Banner URL</label>
+              <Input
+                {...form.register("imageUrl")}
+                placeholder="https://..."
+                className="bg-[#1A1A1F] border-[#2B2B30]"
+              />
+              <p className="text-xs text-gray-500">Optional. Image used on event pages for this sponsor.</p>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-200">Cash value (optional)</label>
               <Input
@@ -250,7 +265,7 @@ export function CreateSponsorshipDialog({
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
 
           <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
+            These changes update local mock data only. Later this will call the real SNP backend.
           </p>
 
           <DialogFooter>

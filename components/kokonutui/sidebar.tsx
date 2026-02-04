@@ -1,7 +1,6 @@
 "use client"
 
-import React from "react"
-
+import type { ReactNode } from "react"
 import {
   BarChart2,
   Calendar,
@@ -21,216 +20,203 @@ import {
   Menu,
   LayoutGrid,
   Home,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from "lucide-react"
-
 import Link from "next/link"
-import { useState } from "react"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
-export default function Sidebar() {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+interface SidebarProps {
+  collapsed: boolean
+  onToggle: (collapsed: boolean) => void
+}
+
+interface NavItemConfig {
+  href: string
+  label: string
+  icon: React.ElementType
+}
+
+const navSections: { title: string; items: NavItemConfig[] }[] = [
+  {
+    title: "Overview",
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: Home },
+      { href: "/kpis", label: "Operations KPIs", icon: BarChart2 },
+    ],
+  },
+  {
+    title: "Events",
+    items: [
+      { href: "/events", label: "Events", icon: Calendar },
+      { href: "/events/zones", label: "Zones & Layout", icon: LayoutGrid },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { href: "/work-orders", label: "Work Orders", icon: ClipboardList },
+      { href: "/incidents", label: "Incidents", icon: AlertTriangle },
+      { href: "/improvements", label: "Improvements", icon: Lightbulb },
+    ],
+  },
+  {
+    title: "Staff & Access",
+    items: [
+      { href: "/staff", label: "Staff & Roles", icon: Users2 },
+      { href: "/shifts", label: "Shifts & Assignments", icon: Clock },
+      { href: "/access", label: "Credentials & QR", icon: QrCode },
+    ],
+  },
+  {
+    title: "Inventory",
+    items: [
+      { href: "/inventory/assets", label: "Assets", icon: Package },
+      { href: "/inventory/categories", label: "Asset Categories", icon: FolderTree },
+    ],
+  },
+  {
+    title: "Partners",
+    items: [
+      { href: "/partners", label: "Partners & Brands", icon: Handshake },
+      { href: "/sponsors", label: "Sponsors", icon: Trophy },
+    ],
+  },
+  {
+    title: "Referees & Training",
+    items: [
+      { href: "/referees", label: "Referees & Tatamis", icon: GraduationCap },
+      { href: "/trainings", label: "Trainings", icon: Dumbbell },
+    ],
+  },
+]
+
+const settingsItem: NavItemConfig = { href: "/settings", label: "Settings", icon: Settings }
+
+export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
-  function handleNavigation() {
+  function closeMobileMenu() {
     setIsMobileMenuOpen(false)
   }
 
-  function NavItem({
-    href,
-    icon: Icon,
-    children,
-  }: {
-    href: string
-    icon: React.ElementType
-    children: React.ReactNode
-  }) {
+  function NavItem({ href, label, icon: Icon }: NavItemConfig) {
     const isActive = pathname === href
-    return (
-      <Link
-        href={href}
-        onClick={handleNavigation}
-        className={`flex items-center px-3 py-2 text-sm rounded-md transition-colors ${
-          isActive
-            ? "bg-white/10 text-white"
-            : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-[#1F1F23]"
-        }`}
-      >
-        <Icon className="h-4 w-4 mr-3 flex-shrink-0" />
-        {children}
+    const linkClasses = cn(
+      "flex items-center rounded-md py-2 text-sm transition-colors",
+      "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-[#1F1F23]",
+      isActive && "bg-white/10 text-white",
+      collapsed ? "px-3 lg:justify-center lg:px-2" : "px-3"
+    )
+
+    const content: ReactNode = (
+      <Link href={href} onClick={closeMobileMenu} className={linkClasses}>
+        <Icon className={cn("h-4 w-4 flex-shrink-0", collapsed ? "lg:mr-0" : "mr-3")} />
+        <span className={collapsed ? "lg:sr-only" : ""}>{label}</span>
       </Link>
+    )
+
+    if (!collapsed) {
+      return content
+    }
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{content}</TooltipTrigger>
+        <TooltipContent side="right" className="hidden lg:block">
+          {label}
+        </TooltipContent>
+      </Tooltip>
     )
   }
 
   return (
-    <>
-      <button
+    <TooltipProvider delayDuration={100}>
+      <Button
         type="button"
-        className="lg:hidden fixed top-4 left-4 z-[70] p-2 rounded-lg bg-white dark:bg-[#0F0F12] shadow-md"
-        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        variant="outline"
+        size="icon"
+        className="lg:hidden fixed top-4 left-4 z-[80] rounded-lg border-[#2B2B30] bg-white dark:bg-[#0F0F12]"
+        onClick={() => setIsMobileMenuOpen((prev) => !prev)}
       >
-        <Menu className="h-5 w-5 text-gray-600 dark:text-gray-300" />
-      </button>
-      <nav
-        className={`
-                fixed inset-y-0 left-0 z-[70] w-64 bg-white dark:bg-[#0F0F12] transform transition-transform duration-200 ease-in-out
-                lg:translate-x-0 lg:static lg:w-64 border-r border-gray-200 dark:border-[#1F1F23]
-                ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
-            `}
+        {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </Button>
+
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-[70] border-r border-gray-200 dark:border-[#1F1F23] bg-white dark:bg-[#0F0F12]",
+          "w-64 transition-[width,transform] duration-200 ease-in-out",
+          "-translate-x-full lg:translate-x-0",
+          isMobileMenuOpen && "translate-x-0",
+          collapsed ? "lg:w-16" : "lg:w-64"
+        )}
       >
-        <div className="h-full flex flex-col">
-          <Link
-            href="/dashboard"
-            className="h-16 px-6 flex items-center border-b border-gray-200 dark:border-[#1F1F23]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex-shrink-0 w-8 h-8 bg-black rounded-md flex items-center justify-center overflow-hidden">
-                <Image
-                  src="/images/snp-logo.png"
-                  alt="SNP Logo"
-                  width={32}
-                  height={32}
-                  className="object-contain"
-                />
+        <div className="flex h-full flex-col">
+          <div className="flex h-16 items-center gap-2 border-b border-gray-200 px-3 dark:border-[#1F1F23]">
+            <Link href="/dashboard" onClick={closeMobileMenu} className="flex items-center gap-3 overflow-hidden">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black">
+                <Image src="/images/snp-logo.png" alt="SNP Logo" width={32} height={32} className="object-contain" />
               </div>
-              <span className="text-lg font-semibold hover:cursor-pointer text-gray-900 dark:text-white">
+              <span className={cn("text-lg font-semibold text-gray-900 dark:text-white", collapsed && "lg:hidden")}>
                 SNP
               </span>
-            </div>
-          </Link>
+            </Link>
 
-          <div className="flex-1 overflow-y-auto py-4 px-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ml-auto hidden lg:flex"
+              onClick={() => onToggle(!collapsed)}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-3 py-4">
             <div className="space-y-6">
-              {/* OVERVIEW */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Overview
+              {navSections.map((section) => (
+                <div key={section.title}>
+                  <div
+                    className={cn(
+                      "mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400",
+                      collapsed && "lg:sr-only"
+                    )}
+                  >
+                    {section.title}
+                  </div>
+                  <div className="space-y-1">
+                    {section.items.map((item) => (
+                      <NavItem key={item.href} {...item} />
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <NavItem href="/dashboard" icon={Home}>
-                    Dashboard
-                  </NavItem>
-                  <NavItem href="/kpis" icon={BarChart2}>
-                    Operations KPIs
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* EVENTS */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Events
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/events" icon={Calendar}>
-                    Events
-                  </NavItem>
-                  <NavItem href="/events/zones" icon={LayoutGrid}>
-                    Zones & Layout
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* OPERATIONS */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Operations
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/work-orders" icon={ClipboardList}>
-                    Work Orders
-                  </NavItem>
-                  <NavItem href="/incidents" icon={AlertTriangle}>
-                    Incidents
-                  </NavItem>
-                  <NavItem href="/improvements" icon={Lightbulb}>
-                    Improvements
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* STAFF & ACCESS */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Staff & Access
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/staff" icon={Users2}>
-                    Staff & Roles
-                  </NavItem>
-                  <NavItem href="/shifts" icon={Clock}>
-                    Shifts & Assignments
-                  </NavItem>
-                  <NavItem href="/access" icon={QrCode}>
-                    Credentials & QR
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* INVENTORY */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Inventory
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/inventory/assets" icon={Package}>
-                    Assets
-                  </NavItem>
-                  <NavItem href="/inventory/categories" icon={FolderTree}>
-                    Asset Categories
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* PARTNERS */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Partners
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/partners" icon={Handshake}>
-                    Partners & Brands
-                  </NavItem>
-                  <NavItem href="/sponsors" icon={Trophy}>
-                    Sponsors
-                  </NavItem>
-                </div>
-              </div>
-
-              {/* REFEREES & TRAINING */}
-              <div>
-                <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Referees & Training
-                </div>
-                <div className="space-y-1">
-                  <NavItem href="/referees" icon={GraduationCap}>
-                    Referees & Tatamis
-                  </NavItem>
-                  <NavItem href="/trainings" icon={Dumbbell}>
-                    Trainings
-                  </NavItem>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          <div className="px-4 py-4 border-t border-gray-200 dark:border-[#1F1F23]">
-            <div className="space-y-1">
-              <NavItem href="/settings" icon={Settings}>
-                Settings
-              </NavItem>
-            </div>
+          <div className="border-t border-gray-200 px-3 py-4 dark:border-[#1F1F23]">
+            <NavItem {...settingsItem} />
           </div>
         </div>
-      </nav>
+      </aside>
 
       {isMobileMenuOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-[65] lg:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
-          onKeyDown={(e) => e.key === "Escape" && setIsMobileMenuOpen(false)}
+        <button
+          type="button"
+          aria-label="Close menu overlay"
+          className="fixed inset-0 z-[65] bg-black/50 lg:hidden"
+          onClick={closeMobileMenu}
         />
       )}
-    </>
+    </TooltipProvider>
   )
 }

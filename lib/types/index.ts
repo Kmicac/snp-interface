@@ -3,6 +3,7 @@ export interface User {
   id: string
   email: string
   name: string
+  avatarUrl?: string
   avatar?: string
   memberships: Membership[]
 }
@@ -75,6 +76,7 @@ export interface Staff {
   phone?: string
   roles: StaffRole[]
   notes?: string
+  avatarUrl?: string
   avatar?: string
 }
 
@@ -149,6 +151,7 @@ export type SponsorTier = 'title' | 'gold' | 'silver' | 'bronze' | 'support'
 export interface Brand {
   id: string
   name: string
+  logoUrl?: string
   logo?: string
   website?: string
   instagram?: string
@@ -160,6 +163,8 @@ export interface Sponsor {
   id: string
   brandId: string
   brandName: string
+  logoUrl?: string
+  imageUrl?: string
   logo?: string
   tier: SponsorTier
   website?: string

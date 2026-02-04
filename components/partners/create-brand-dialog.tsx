@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 export interface CreateBrandPayload {
   name: string
+  logoUrl?: string
   websiteUrl?: string
   instagramUrl?: string
   contactName?: string
@@ -34,6 +35,7 @@ interface CreateBrandDialogProps {
 
 const schema = z.object({
   name: z.string().trim().min(2, "Brand name is required"),
+  logoUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   websiteUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   instagramUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   contactName: z.string().optional(),
@@ -47,6 +49,7 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
     resolver: zodResolver(schema),
     defaultValues: {
       name: "",
+      logoUrl: "",
       websiteUrl: "",
       instagramUrl: "",
       contactName: "",
@@ -60,6 +63,7 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
     if (!open) {
       form.reset({
         name: "",
+        logoUrl: "",
         websiteUrl: "",
         instagramUrl: "",
         contactName: "",
@@ -75,6 +79,7 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
   const handleSubmit = form.handleSubmit((data) => {
     onCreate({
       ...data,
+      logoUrl: data.logoUrl || undefined,
       websiteUrl: data.websiteUrl || undefined,
       instagramUrl: data.instagramUrl || undefined,
       contactName: data.contactName || undefined,
@@ -104,6 +109,16 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
                 placeholder="Leglock Store"
                 className="bg-[#1A1A1F] border-[#2B2B30]"
               />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-200">Logo URL</label>
+              <Input
+                {...form.register("logoUrl")}
+                placeholder="https://..."
+                className="bg-[#1A1A1F] border-[#2B2B30]"
+              />
+              <p className="text-xs text-gray-500">Optional. Logo that will be shown for this brand and its sponsorships.</p>
             </div>
 
             <div className="space-y-2">
@@ -165,7 +180,7 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
 
           <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
+            These changes update local mock data only. Later this will call the real SNP backend.
           </p>
 
           <DialogFooter>

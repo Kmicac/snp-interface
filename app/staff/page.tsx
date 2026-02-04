@@ -17,13 +17,17 @@ import { mockStaff } from "@/lib/mock-data"
 import type { StaffRole, Staff } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
 import { CreateStaffDialog, type CreateStaffPayload } from "@/components/staff/create-staff-dialog"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 type StaffListItem = Staff & {
   documentId?: string
 }
 
 const initialStaff: StaffListItem[] = [
-  ...mockStaff,
+  ...mockStaff.map((member) => ({
+    ...member,
+    avatarUrl: member.avatarUrl ?? member.avatar,
+  })),
   {
     id: "st-6",
     name: "Roberto Alves",
@@ -86,6 +90,7 @@ export default function StaffPage() {
       roles: [roleMap[payload.role]],
       notes: payload.notes,
       documentId: payload.documentId,
+      avatarUrl: payload.avatarUrl,
     }
 
     setStaffList((prev) => [nextStaff, ...prev])
@@ -189,10 +194,18 @@ export default function StaffPage() {
                     className="border-b border-[#1F1F23] hover:bg-[#1A1A1F] transition-colors"
                   >
                     <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-white">{staffMember.name}</span>
-                      {staffMember.documentId && (
-                        <p className="text-xs text-gray-500 mt-1">Document: {staffMember.documentId}</p>
-                      )}
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          {staffMember.avatarUrl && <AvatarImage src={staffMember.avatarUrl} alt={staffMember.name} />}
+                          <AvatarFallback>{staffMember.name?.charAt(0) ?? "S"}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <span className="text-sm font-medium text-white">{staffMember.name}</span>
+                          {staffMember.documentId && (
+                            <p className="text-xs text-gray-500 mt-1">Document: {staffMember.documentId}</p>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="space-y-1">

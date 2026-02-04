@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { mockSponsorsByTier } from "@/lib/mock-data"
 import type { SponsorTier } from "@/lib/types"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function SponsorsCard() {
   const getTierColor = (tier: SponsorTier) => {
@@ -54,12 +55,16 @@ export default function SponsorsCard() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {sponsors.map((sponsor) => (
-                  <span
+                  <div
                     key={sponsor.id}
-                    className="px-3 py-1 text-sm bg-[#1A1A1F] text-gray-300 rounded-full border border-[#2B2B30]"
+                    className="flex items-center gap-2 rounded-full border border-[#2B2B30] bg-[#1A1A1F] px-3 py-1 text-sm text-gray-300"
                   >
-                    {sponsor.brandName}
-                  </span>
+                    <Avatar className="h-5 w-5">
+                      <AvatarImage src={sponsor.logo || undefined} alt={sponsor.brandName} />
+                      <AvatarFallback>{sponsor.brandName.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <span>{sponsor.brandName}</span>
+                  </div>
                 ))}
               </div>
             </div>
