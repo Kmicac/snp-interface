@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -29,6 +29,8 @@ interface CreateEventDialogProps {
   onOpenChange: (open: boolean) => void
   organizationId?: string
   organizationName?: string
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateEventPayload>
   onCreate: (payload: CreateEventPayload) => void
 }
 
@@ -51,32 +53,32 @@ export function CreateEventDialog({
   onOpenChange,
   organizationId,
   organizationName,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreateEventDialogProps) {
+  const defaultValues = useMemo<CreateEventPayload>(
+    () => ({
+      organizationId: initialValues?.organizationId ?? organizationId ?? "",
+      code: initialValues?.code ?? "",
+      name: initialValues?.name ?? "",
+      startDate: initialValues?.startDate ?? "",
+      endDate: initialValues?.endDate ?? "",
+      venue: initialValues?.venue ?? "",
+    }),
+    [initialValues, organizationId]
+  )
+
   const form = useForm<CreateEventPayload>({
     resolver: zodResolver(createEventSchema),
-    defaultValues: {
-      organizationId: organizationId ?? "",
-      code: "",
-      name: "",
-      startDate: "",
-      endDate: "",
-      venue: "",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        organizationId: organizationId ?? "",
-        code: "",
-        name: "",
-        startDate: "",
-        endDate: "",
-        venue: "",
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, organizationId, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -89,9 +91,11 @@ export function CreateEventDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create Event</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Event" : "Create Event"}</DialogTitle>
           <DialogDescription>
-            Add a new event for your organization and schedule operations.
+            {mode === "edit"
+              ? "Update event details for operations planning."
+              : "Add a new event for your organization and schedule operations."}
           </DialogDescription>
         </DialogHeader>
 
@@ -115,7 +119,9 @@ export function CreateEventDialog({
                 {...form.register("code")}
                 placeholder="ADCC_LATAM_2026"
                 className="bg-[#1A1A1F] border-[#2B2B30]"
+                readOnly={mode === "edit"}
               />
+              {mode === "edit" && <p className="text-xs text-gray-500">Event code is locked in edit mode.</p>}
             </div>
 
             <div className="space-y-2">
@@ -165,7 +171,7 @@ export function CreateEventDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Event</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Event"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

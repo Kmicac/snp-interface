@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Handshake, Globe, Instagram, Plus } from "lucide-react"
+import { Handshake, Globe, Instagram, Plus, Pencil } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { CreateBrandDialog, type CreateBrandPayload } from "@/components/partners/create-brand-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -111,18 +111,33 @@ const initialPartnerships: PartnershipItem[] = [
 
 export default function PartnersPage() {
   const { toast } = useToast()
+  const canEdit = true
   const [isBrandDialogOpen, setIsBrandDialogOpen] = useState(false)
   const [isPartnershipDialogOpen, setIsPartnershipDialogOpen] = useState(false)
+  const [editingBrand, setEditingBrand] = useState<BrandItem | null>(null)
+  const [editingPartnership, setEditingPartnership] = useState<PartnershipItem | null>(null)
   const [brands, setBrands] = useState<BrandItem[]>(initialBrands)
   const [partnerships, setPartnerships] = useState<PartnershipItem[]>(initialPartnerships)
+  const previewUrlsRef = useRef<string[]>([])
+
+  useEffect(() => {
+    return () => {
+      previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
 
   const handleCreateBrand = (payload: CreateBrandPayload) => {
-    console.log("Create Brand payload", payload)
+    console.log("Create Brand payload", { ...payload, logoFile: payload.logoFile })
+
+    const logoSource = payload.logoFile ? URL.createObjectURL(payload.logoFile) : payload.logoUrl
+    if (payload.logoFile && logoSource) {
+      previewUrlsRef.current.push(logoSource)
+    }
 
     const nextBrand: BrandItem = {
       id: `br-${Date.now()}`,
       name: payload.name,
-      logoUrl: payload.logoUrl,
+      logoUrl: logoSource,
       website: payload.websiteUrl,
       instagram: payload.instagramUrl,
       contactName: payload.contactName,
@@ -138,6 +153,41 @@ export default function PartnersPage() {
     toast({
       title: "Brand added",
       description: `${payload.name} was added to local mock data.`,
+    })
+  }
+
+  const handleEditBrand = (payload: CreateBrandPayload) => {
+    if (!editingBrand) return
+
+    console.log("Edit Brand payload", { ...payload, logoFile: payload.logoFile })
+
+    const logoSource = payload.logoFile ? URL.createObjectURL(payload.logoFile) : payload.logoUrl
+    if (payload.logoFile && logoSource) {
+      previewUrlsRef.current.push(logoSource)
+    }
+
+    setBrands((prev) =>
+      prev.map((brand) =>
+        brand.id === editingBrand.id
+          ? {
+              ...brand,
+              name: payload.name,
+              logoUrl: logoSource,
+              website: payload.websiteUrl,
+              instagram: payload.instagramUrl,
+              contactName: payload.contactName,
+              contactEmail: payload.contactEmail,
+              contactPhone: payload.contactPhone,
+              notes: payload.notes,
+            }
+          : brand
+      )
+    )
+
+    setEditingBrand(null)
+    toast({
+      title: "Brand updated",
+      description: `${payload.name} was updated in local mock data.`,
     })
   }
 
@@ -166,6 +216,34 @@ export default function PartnersPage() {
     toast({
       title: "Partnership added",
       description: `${selectedBrand?.name ?? "Brand"} partnership was added to local mock data.`,
+    })
+  }
+
+  const handleEditPartnership = (payload: CreatePartnershipPayload) => {
+    if (!editingPartnership) return
+
+    console.log("Edit Partnership payload", payload)
+
+    setPartnerships((prev) =>
+      prev.map((partnership) =>
+        partnership.id === editingPartnership.id
+          ? {
+              ...partnership,
+              status: payload.status,
+              startDate: payload.startDate,
+              endDate: payload.endDate,
+              scope: payload.scope,
+              benefits: payload.benefits,
+              notes: payload.notes,
+            }
+          : partnership
+      )
+    )
+
+    setEditingPartnership(null)
+    toast({
+      title: "Partnership updated",
+      description: "Partnership was updated in local mock data.",
     })
   }
 
@@ -213,6 +291,11 @@ export default function PartnersPage() {
                   {brand.isSponsor && (
                     <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">Sponsor</Badge>
                   )}
+                  {canEdit && (
+                    <Button variant="ghost" size="sm" onClick={() => setEditingBrand(brand)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -256,6 +339,7 @@ export default function PartnersPage() {
                   <th className="px-6 py-4 font-medium">Status</th>
                   <th className="px-6 py-4 font-medium">Timeline</th>
                   <th className="px-6 py-4 font-medium">Scope</th>
+                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -272,6 +356,14 @@ export default function PartnersPage() {
                         {partnership.startDate || "-"} {partnership.endDate ? `to ${partnership.endDate}` : ""}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-300">{partnership.scope}</td>
+                      {canEdit && (
+                        <td className="px-6 py-4 text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setEditingPartnership(partnership)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
@@ -282,12 +374,56 @@ export default function PartnersPage() {
       </div>
 
       <CreateBrandDialog open={isBrandDialogOpen} onOpenChange={setIsBrandDialogOpen} onCreate={handleCreateBrand} />
+      <CreateBrandDialog
+        open={editingBrand !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingBrand(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingBrand
+            ? {
+                name: editingBrand.name,
+                logoUrl: editingBrand.logoUrl,
+                websiteUrl: editingBrand.website,
+                instagramUrl: editingBrand.instagram,
+                contactName: editingBrand.contactName,
+                contactEmail: editingBrand.contactEmail,
+                contactPhone: editingBrand.contactPhone,
+                notes: editingBrand.notes,
+              }
+            : undefined
+        }
+        onCreate={handleEditBrand}
+      />
 
       <CreatePartnershipDialog
         open={isPartnershipDialogOpen}
         onOpenChange={setIsPartnershipDialogOpen}
         brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
         onCreate={handleCreatePartnership}
+      />
+      <CreatePartnershipDialog
+        open={editingPartnership !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingPartnership(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingPartnership
+            ? {
+                brandId: editingPartnership.brandId,
+                status: editingPartnership.status,
+                startDate: editingPartnership.startDate,
+                endDate: editingPartnership.endDate,
+                scope: editingPartnership.scope,
+                benefits: editingPartnership.benefits,
+                notes: editingPartnership.notes,
+              }
+            : undefined
+        }
+        brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
+        onCreate={handleEditPartnership}
       />
     </Layout>
   )

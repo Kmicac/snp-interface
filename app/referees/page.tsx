@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { GraduationCap, Award, Users2, Plus } from "lucide-react"
+import { GraduationCap, Award, Users2, Plus, Pencil } from "lucide-react"
 import { mockReferees, mockTatamis, mockStaff } from "@/lib/mock-data"
 import type { RefereeLevel } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
@@ -42,6 +42,14 @@ interface TatamiListItem {
   }[]
 }
 
+interface AssignmentEditState {
+  tatamiId: string
+  assignmentIndex: number
+  eventId: string
+  refereeId: string
+  role: string
+}
+
 const levelByRank = (rank: string): RefereeLevel => {
   const normalized = rank.toLowerCase()
 
@@ -68,9 +76,12 @@ const initialStaffOptions = Array.from(
 export default function RefereesPage() {
   const { events, currentEvent } = useAuth()
   const { toast } = useToast()
+  const canEdit = true
 
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false)
+  const [editingReferee, setEditingReferee] = useState<RefereeListItem | null>(null)
+  const [editingAssignment, setEditingAssignment] = useState<AssignmentEditState | null>(null)
   const [referees, setReferees] = useState<RefereeListItem[]>(mockReferees)
   const [tatamis, setTatamis] = useState<TatamiListItem[]>(mockTatamis)
 
@@ -129,6 +140,70 @@ export default function RefereesPage() {
     })
   }
 
+  const handleEditRefereeProfile = (payload: CreateRefereeProfilePayload) => {
+    if (!editingReferee) return
+
+    console.log("Edit Referee Profile payload", payload)
+
+    setReferees((prev) =>
+      prev.map((referee) =>
+        referee.id === editingReferee.id
+          ? {
+              ...referee,
+              level: levelByRank(payload.rank),
+              rank: payload.rank,
+              association: payload.association,
+              experience: payload.experience,
+              certifications: payload.association ? [payload.association] : [],
+              active: payload.active,
+            }
+          : referee
+      )
+    )
+
+    setEditingReferee(null)
+    toast({
+      title: "Referee updated",
+      description: "Referee profile was updated in local mock data.",
+    })
+  }
+
+  const handleEditAssignment = (payload: AssignRefereeTatamiPayload) => {
+    if (!editingAssignment) return
+
+    console.log("Edit Assignment payload", payload)
+    const selectedReferee = referees.find((referee) => referee.id === payload.refereeId)
+
+    setTatamis((prev) => {
+      const nextTatamis = prev.map((tatami) => ({
+        ...tatami,
+        assignedReferees: [...tatami.assignedReferees],
+      }))
+
+      const sourceTatami = nextTatamis.find((tatami) => tatami.id === editingAssignment.tatamiId)
+      if (!sourceTatami) return prev
+
+      sourceTatami.assignedReferees.splice(editingAssignment.assignmentIndex, 1)
+
+      const targetTatami = nextTatamis.find((tatami) => tatami.id === payload.tatamiId)
+      if (!targetTatami) return prev
+
+      targetTatami.assignedReferees.push({
+        refereeId: payload.refereeId,
+        refereeName: selectedReferee?.name ?? "Unknown referee",
+        role: payload.role,
+      })
+
+      return nextTatamis
+    })
+
+    setEditingAssignment(null)
+    toast({
+      title: "Assignment updated",
+      description: "Tatami assignment was updated in local mock data.",
+    })
+  }
+
   const getLevelBadge = (level: RefereeLevel) => {
     const config: Record<RefereeLevel, string> = {
       junior: "bg-gray-500/20 text-gray-400 border-gray-500/30",
@@ -183,8 +258,27 @@ export default function RefereesPage() {
                     key={`${assignedReferee.refereeId}-${index}`}
                     className="flex items-center justify-between p-3 bg-[#1A1A1F] rounded-lg"
                   >
-                    <span className="text-white">{assignedReferee.refereeName}</span>
-                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30">{assignedReferee.role}</Badge>
+                    <div>
+                      <span className="text-white">{assignedReferee.refereeName}</span>
+                      <Badge className="ml-2 bg-green-500/20 text-green-400 border-green-500/30">{assignedReferee.role}</Badge>
+                    </div>
+                    {canEdit && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setEditingAssignment({
+                            tatamiId: tatami.id,
+                            assignmentIndex: index,
+                            eventId: currentEvent?.id || events[0]?.id || "",
+                            refereeId: assignedReferee.refereeId,
+                            role: assignedReferee.role,
+                          })
+                        }
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 ))}
                 {tatami.assignedReferees.length === 0 && <p className="text-gray-500 text-sm">No referees assigned</p>}
@@ -205,6 +299,7 @@ export default function RefereesPage() {
                   <th className="px-6 py-4 font-medium">Level</th>
                   <th className="px-6 py-4 font-medium">Certifications</th>
                   <th className="px-6 py-4 font-medium">Events</th>
+                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -235,6 +330,14 @@ export default function RefereesPage() {
                     <td className="px-6 py-4">
                       <span className="text-sm text-gray-300">{referee.eventsRefereed}</span>
                     </td>
+                    {canEdit && (
+                      <td className="px-6 py-4 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingReferee(referee)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -258,6 +361,48 @@ export default function RefereesPage() {
         tatamis={tatamis.map((tatami) => ({ id: tatami.id, name: tatami.name }))}
         referees={refereeOptions}
         onCreate={handleAssignReferee}
+      />
+      <CreateRefereeProfileDialog
+        open={editingReferee !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingReferee(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingReferee
+            ? {
+                staffId: editingReferee.staffId,
+                rank: editingReferee.rank || "",
+                association: editingReferee.association,
+                experience: editingReferee.experience,
+                active: editingReferee.active ?? true,
+              }
+            : undefined
+        }
+        staffMembers={initialStaffOptions}
+        onCreate={handleEditRefereeProfile}
+      />
+      <AssignRefereeTatamiDialog
+        open={editingAssignment !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingAssignment(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingAssignment
+            ? {
+                eventId: editingAssignment.eventId,
+                tatamiId: editingAssignment.tatamiId,
+                refereeId: editingAssignment.refereeId,
+                role: editingAssignment.role,
+              }
+            : undefined
+        }
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        selectedEventId={currentEvent?.id}
+        tatamis={tatamis.map((tatami) => ({ id: tatami.id, name: tatami.name }))}
+        referees={refereeOptions}
+        onCreate={handleEditAssignment}
       />
     </Layout>
   )

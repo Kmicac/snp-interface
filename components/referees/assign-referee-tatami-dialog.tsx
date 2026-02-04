@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -51,6 +51,8 @@ interface AssignRefereeTatamiDialogProps {
   selectedEventId?: string
   tatamis: TatamiOption[]
   referees: RefereeOption[]
+  mode?: "create" | "edit"
+  initialValues?: Partial<AssignRefereeTatamiPayload>
   onCreate: (payload: AssignRefereeTatamiPayload) => void
 }
 
@@ -68,28 +70,30 @@ export function AssignRefereeTatamiDialog({
   selectedEventId,
   tatamis,
   referees,
+  mode = "create",
+  initialValues,
   onCreate,
 }: AssignRefereeTatamiDialogProps) {
+  const defaultValues = useMemo<AssignRefereeTatamiPayload>(
+    () => ({
+      eventId: initialValues?.eventId || selectedEventId || events[0]?.id || "",
+      tatamiId: initialValues?.tatamiId || tatamis[0]?.id || "",
+      refereeId: initialValues?.refereeId || referees[0]?.id || "",
+      role: initialValues?.role || "Center Referee",
+    }),
+    [events, initialValues, referees, selectedEventId, tatamis]
+  )
+
   const form = useForm<AssignRefereeTatamiPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      eventId: selectedEventId || events[0]?.id || "",
-      tatamiId: tatamis[0]?.id || "",
-      refereeId: referees[0]?.id || "",
-      role: "Center Referee",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        eventId: selectedEventId || events[0]?.id || "",
-        tatamiId: tatamis[0]?.id || "",
-        refereeId: referees[0]?.id || "",
-        role: "Center Referee",
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, selectedEventId, events, tatamis, referees, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -102,9 +106,11 @@ export function AssignRefereeTatamiDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Assign Referee to Tatami</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Tatami Assignment" : "Assign Referee to Tatami"}</DialogTitle>
           <DialogDescription>
-            Assign an available referee profile to a tatami role for an event.
+            {mode === "edit"
+              ? "Update tatami, referee, or role for this assignment."
+              : "Assign an available referee profile to a tatami role for an event."}
           </DialogDescription>
         </DialogHeader>
 
@@ -187,7 +193,7 @@ export function AssignRefereeTatamiDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Assign to Tatami</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Assign to Tatami"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

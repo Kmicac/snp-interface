@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -41,6 +41,8 @@ interface CreateRefereeProfileDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   staffMembers: StaffOption[]
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateRefereeProfilePayload>
   onCreate: (payload: CreateRefereeProfilePayload) => void
 }
 
@@ -56,30 +58,31 @@ export function CreateRefereeProfileDialog({
   open,
   onOpenChange,
   staffMembers,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreateRefereeProfileDialogProps) {
+  const defaultValues = useMemo<CreateRefereeProfilePayload>(
+    () => ({
+      staffId: initialValues?.staffId || staffMembers[0]?.id || "",
+      rank: initialValues?.rank || "",
+      association: initialValues?.association || "",
+      experience: initialValues?.experience || "",
+      active: initialValues?.active ?? true,
+    }),
+    [initialValues, staffMembers]
+  )
+
   const form = useForm<CreateRefereeProfilePayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      staffId: staffMembers[0]?.id || "",
-      rank: "",
-      association: "",
-      experience: "",
-      active: true,
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        staffId: staffMembers[0]?.id || "",
-        rank: "",
-        association: "",
-        experience: "",
-        active: true,
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, staffMembers, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -96,9 +99,11 @@ export function CreateRefereeProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create Referee Profile</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Referee Profile" : "Create Referee Profile"}</DialogTitle>
           <DialogDescription>
-            Create a referee profile based on an existing staff member.
+            {mode === "edit"
+              ? "Update referee profile attributes and availability."
+              : "Create a referee profile based on an existing staff member."}
           </DialogDescription>
         </DialogHeader>
 
@@ -109,6 +114,7 @@ export function CreateRefereeProfileDialog({
               <Select
                 value={form.watch("staffId")}
                 onValueChange={(value) => form.setValue("staffId", value, { shouldValidate: true })}
+                disabled={mode === "edit"}
               >
                 <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
                   <SelectValue placeholder="Select staff member" />
@@ -169,7 +175,7 @@ export function CreateRefereeProfileDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Referee Profile</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Referee Profile"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

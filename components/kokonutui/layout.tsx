@@ -31,7 +31,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0F0F12]">
+    <div className="min-h-screen overflow-x-hidden bg-white dark:bg-[#0F0F12]">
       <Sidebar collapsed={sidebarCollapsed} onToggle={setSidebarCollapsed} />
 
       <div
@@ -43,7 +43,7 @@ export default function Layout({ children }: LayoutProps) {
         <header className="h-16 border-b border-gray-200 dark:border-[#1F1F23]">
           <TopNav />
         </header>
-        <main className="flex-1 overflow-auto bg-white p-6 dark:bg-[#0F0F12]">{children}</main>
+        <main className="flex-1 overflow-auto bg-white p-4 sm:p-6 dark:bg-[#0F0F12]">{children}</main>
       </div>
     </div>
   )

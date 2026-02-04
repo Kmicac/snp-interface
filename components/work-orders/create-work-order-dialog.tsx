@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -28,6 +28,8 @@ interface EventOption {
   name: string
 }
 
+type WorkOrderDialogMode = "create" | "edit"
+
 export interface CreateWorkOrderPayload {
   eventId: string
   providerService: string
@@ -37,7 +39,7 @@ export interface CreateWorkOrderPayload {
   scheduledStart: string
   scheduledEnd: string
   slaMinutes?: number
-  status: "SCHEDULED"
+  status: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "DELAYED" | "CANCELED"
 }
 
 interface CreateWorkOrderDialogProps {
@@ -47,6 +49,8 @@ interface CreateWorkOrderDialogProps {
   selectedEventId?: string
   providerServices: string[]
   zones: string[]
+  mode?: WorkOrderDialogMode
+  initialValues?: Partial<CreateWorkOrderPayload>
   onCreate: (payload: CreateWorkOrderPayload) => void
 }
 
@@ -60,7 +64,7 @@ const createWorkOrderSchema = z
     scheduledStart: z.string().min(1, "Scheduled start is required"),
     scheduledEnd: z.string().min(1, "Scheduled end is required"),
     slaMinutes: z.number().int().positive().optional(),
-    status: z.literal("SCHEDULED"),
+    status: z.enum(["SCHEDULED", "IN_PROGRESS", "COMPLETED", "DELAYED", "CANCELED"]),
   })
   .refine((data) => new Date(data.scheduledEnd).getTime() >= new Date(data.scheduledStart).getTime(), {
     message: "Scheduled end must be after scheduled start",
@@ -74,38 +78,35 @@ export function CreateWorkOrderDialog({
   selectedEventId,
   providerServices,
   zones,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreateWorkOrderDialogProps) {
+  const defaultValues = useMemo<CreateWorkOrderPayload>(
+    () => ({
+      eventId: initialValues?.eventId || selectedEventId || events[0]?.id || "",
+      providerService: initialValues?.providerService || providerServices[0] || "",
+      zone: initialValues?.zone ?? null,
+      title: initialValues?.title || "",
+      description: initialValues?.description || "",
+      scheduledStart: initialValues?.scheduledStart || "",
+      scheduledEnd: initialValues?.scheduledEnd || "",
+      slaMinutes: initialValues?.slaMinutes,
+      status: initialValues?.status || "SCHEDULED",
+    }),
+    [events, initialValues, providerServices, selectedEventId]
+  )
+
   const form = useForm<CreateWorkOrderPayload>({
     resolver: zodResolver(createWorkOrderSchema),
-    defaultValues: {
-      eventId: selectedEventId || events[0]?.id || "",
-      providerService: providerServices[0] || "",
-      zone: null,
-      title: "",
-      description: "",
-      scheduledStart: "",
-      scheduledEnd: "",
-      slaMinutes: undefined,
-      status: "SCHEDULED",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        eventId: selectedEventId || events[0]?.id || "",
-        providerService: providerServices[0] || "",
-        zone: null,
-        title: "",
-        description: "",
-        scheduledStart: "",
-        scheduledEnd: "",
-        slaMinutes: undefined,
-        status: "SCHEDULED",
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, selectedEventId, events, providerServices, form])
+  }, [open])
 
   const eventId = form.watch("eventId")
   const providerService = form.watch("providerService")
@@ -121,9 +122,11 @@ export function CreateWorkOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Create Work Order</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Work Order" : "Create Work Order"}</DialogTitle>
           <DialogDescription>
-            Plan an operational task with SLA expectations and initial scheduling.
+            {mode === "edit"
+              ? "Update operational task details and scheduling."
+              : "Plan an operational task with SLA expectations and initial scheduling."}
           </DialogDescription>
         </DialogHeader>
 
@@ -134,6 +137,7 @@ export function CreateWorkOrderDialog({
               <Select
                 value={eventId}
                 onValueChange={(value) => form.setValue("eventId", value, { shouldValidate: true })}
+                disabled={mode === "edit"}
               >
                 <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
                   <SelectValue placeholder="Select event" />
@@ -183,6 +187,27 @@ export function CreateWorkOrderDialog({
                       {zone}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-200">Initial status</label>
+              <Select
+                value={form.watch("status")}
+                onValueChange={(value: CreateWorkOrderPayload["status"]) =>
+                  form.setValue("status", value, { shouldValidate: true })
+                }
+              >
+                <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SCHEDULED">SCHEDULED</SelectItem>
+                  <SelectItem value="IN_PROGRESS">IN_PROGRESS</SelectItem>
+                  <SelectItem value="COMPLETED">COMPLETED</SelectItem>
+                  <SelectItem value="DELAYED">DELAYED</SelectItem>
+                  <SelectItem value="CANCELED">CANCELED</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -247,7 +272,7 @@ export function CreateWorkOrderDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Work Order</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Work Order"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

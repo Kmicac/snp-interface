@@ -18,7 +18,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 export default function TopNav() {
   const { user, currentOrg, currentEvent, organizations, events, setCurrentOrg, setCurrentEvent } = useAuth()
   const pathname = usePathname()
-  const avatarSrc = user?.avatarUrl || user?.avatar
+  const avatarSrc = user?.avatarUrl?.trim() || user?.avatar?.trim() || undefined
+  const avatarFallback = user?.name?.trim()?.charAt(0)?.toUpperCase() || "U"
 
   // Generate breadcrumbs based on pathname
   const getBreadcrumbs = () => {
@@ -136,7 +137,7 @@ export default function TopNav() {
           <DropdownMenuTrigger className="focus:outline-none">
             <Avatar className="h-8 w-8 cursor-pointer ring-2 ring-gray-200 dark:ring-[#2B2B30]">
               {avatarSrc && <AvatarImage src={avatarSrc} alt={user?.name ?? "User"} />}
-              <AvatarFallback>{user?.name?.charAt(0) ?? "U"}</AvatarFallback>
+              <AvatarFallback className="bg-[#1A1A1F] text-gray-200">{avatarFallback}</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent

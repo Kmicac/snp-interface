@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -49,6 +49,8 @@ interface CreateAssetDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   categories: string[]
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateAssetPayload>
   onCreate: (payload: CreateAssetPayload) => void
 }
 
@@ -64,37 +66,39 @@ const schema = z.object({
   notes: z.string().optional(),
 })
 
-export function CreateAssetDialog({ open, onOpenChange, categories, onCreate }: CreateAssetDialogProps) {
+export function CreateAssetDialog({
+  open,
+  onOpenChange,
+  categories,
+  mode = "create",
+  initialValues,
+  onCreate,
+}: CreateAssetDialogProps) {
+  const defaultValues = useMemo<CreateAssetPayload>(
+    () => ({
+      category: initialValues?.category || categories[0] || "",
+      name: initialValues?.name || "",
+      assetTag: initialValues?.assetTag || "",
+      serialNumber: initialValues?.serialNumber || "",
+      quantity: initialValues?.quantity ?? 1,
+      status: initialValues?.status || "IN_STORAGE",
+      condition: initialValues?.condition || "GOOD",
+      location: initialValues?.location || "",
+      notes: initialValues?.notes || "",
+    }),
+    [categories, initialValues]
+  )
+
   const form = useForm<CreateAssetPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      category: categories[0] ?? "",
-      name: "",
-      assetTag: "",
-      serialNumber: "",
-      quantity: 1,
-      status: "IN_STORAGE",
-      condition: "GOOD",
-      location: "",
-      notes: "",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        category: categories[0] ?? "",
-        name: "",
-        assetTag: "",
-        serialNumber: "",
-        quantity: 1,
-        status: "IN_STORAGE",
-        condition: "GOOD",
-        location: "",
-        notes: "",
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, categories, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -112,9 +116,11 @@ export function CreateAssetDialog({ open, onOpenChange, categories, onCreate }: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Asset</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Asset" : "Add Asset"}</DialogTitle>
           <DialogDescription>
-            Register a new inventory asset and its initial operational status.
+            {mode === "edit"
+              ? "Update inventory asset details and operational status."
+              : "Register a new inventory asset and its initial operational status."}
           </DialogDescription>
         </DialogHeader>
 
@@ -248,7 +254,7 @@ export function CreateAssetDialog({ open, onOpenChange, categories, onCreate }: 
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Add Asset</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Add Asset"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

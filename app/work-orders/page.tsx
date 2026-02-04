@@ -22,6 +22,7 @@ import {
   XCircle,
   Filter,
   Plus,
+  Pencil,
 } from "lucide-react"
 import { mockWorkOrders } from "@/lib/mock-data"
 import type { WorkOrderStatus, SlaStatus, WorkOrder } from "@/lib/types"
@@ -85,13 +86,37 @@ const zones = ["TATAMI 1", "TATAMI 2", "TATAMI 3", "ENTRANCE", "VIP", "WARM-UP",
 
 const statusMap: Record<CreateWorkOrderPayload["status"], WorkOrderStatus> = {
   SCHEDULED: "scheduled",
+  IN_PROGRESS: "in_progress",
+  COMPLETED: "completed",
+  DELAYED: "delayed",
+  CANCELED: "cancelled",
+}
+
+const formStatusFromWorkOrder: Record<WorkOrderStatus, CreateWorkOrderPayload["status"]> = {
+  scheduled: "SCHEDULED",
+  in_progress: "IN_PROGRESS",
+  completed: "COMPLETED",
+  delayed: "DELAYED",
+  cancelled: "CANCELED",
+}
+
+function toDateTimeInput(value: string): string {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
+    2,
+    "0"
+  )}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
 export default function WorkOrdersPage() {
   const { events, currentEvent } = useAuth()
   const { toast } = useToast()
+  const canEdit = true
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null)
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(initialWorkOrders)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
@@ -142,6 +167,38 @@ export default function WorkOrdersPage() {
     toast({
       title: "Work order created",
       description: `${payload.title} was added to local mock data.`,
+    })
+  }
+
+  const handleEditWorkOrder = (payload: CreateWorkOrderPayload) => {
+    if (!editingWorkOrder) return
+
+    console.log("Edit Work Order payload", payload)
+
+    const [categoryPart, providerPart] = payload.providerService.split(" - ")
+
+    setWorkOrders((prev) =>
+      prev.map((workOrder) =>
+        workOrder.id === editingWorkOrder.id
+          ? {
+              ...workOrder,
+              title: payload.title,
+              description: payload.description,
+              provider: providerPart ?? payload.providerService,
+              category: categoryPart ?? workOrder.category,
+              zone: payload.zone ?? "UNASSIGNED",
+              scheduledStart: payload.scheduledStart,
+              scheduledEnd: payload.scheduledEnd,
+              status: statusMap[payload.status],
+            }
+          : workOrder
+      )
+    )
+
+    setEditingWorkOrder(null)
+    toast({
+      title: "Work order updated",
+      description: `${payload.title} was updated in local mock data.`,
     })
   }
 
@@ -286,6 +343,7 @@ export default function WorkOrdersPage() {
                   <th className="px-6 py-4 font-medium">Scheduled</th>
                   <th className="px-6 py-4 font-medium">Status</th>
                   <th className="px-6 py-4 font-medium text-center">SLA</th>
+                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -328,6 +386,14 @@ export default function WorkOrdersPage() {
                     </td>
                     <td className="px-6 py-4">{getStatusBadge(workOrder.status)}</td>
                     <td className="px-6 py-4 text-center">{getSlaIcon(workOrder.slaStatus)}</td>
+                    {canEdit && (
+                      <td className="px-6 py-4 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingWorkOrder(workOrder)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -364,6 +430,32 @@ export default function WorkOrdersPage() {
         providerServices={providerServices}
         zones={zones}
         onCreate={handleCreateWorkOrder}
+      />
+      <CreateWorkOrderDialog
+        open={editingWorkOrder !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingWorkOrder(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingWorkOrder
+            ? {
+                eventId: currentEvent?.id || events[0]?.id || "",
+                providerService: `${editingWorkOrder.category} - ${editingWorkOrder.provider}`,
+                zone: editingWorkOrder.zone === "UNASSIGNED" ? null : editingWorkOrder.zone,
+                title: editingWorkOrder.title,
+                description: editingWorkOrder.description || "",
+                scheduledStart: toDateTimeInput(editingWorkOrder.scheduledStart),
+                scheduledEnd: toDateTimeInput(editingWorkOrder.scheduledEnd),
+                status: formStatusFromWorkOrder[editingWorkOrder.status],
+              }
+            : undefined
+        }
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        selectedEventId={currentEvent?.id}
+        providerServices={providerServices}
+        zones={zones}
+        onCreate={handleEditWorkOrder}
       />
     </Layout>
   )

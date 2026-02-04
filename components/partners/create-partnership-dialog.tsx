@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -42,6 +42,8 @@ interface CreatePartnershipDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   brands: BrandOption[]
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreatePartnershipPayload>
   onCreate: (payload: CreatePartnershipPayload) => void
 }
 
@@ -67,34 +69,33 @@ export function CreatePartnershipDialog({
   open,
   onOpenChange,
   brands,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreatePartnershipDialogProps) {
+  const defaultValues = useMemo<CreatePartnershipPayload>(
+    () => ({
+      brandId: initialValues?.brandId || brands[0]?.id || "",
+      status: initialValues?.status || "PROSPECT",
+      startDate: initialValues?.startDate || "",
+      endDate: initialValues?.endDate || "",
+      scope: initialValues?.scope || "",
+      benefits: initialValues?.benefits || "",
+      notes: initialValues?.notes || "",
+    }),
+    [brands, initialValues]
+  )
+
   const form = useForm<CreatePartnershipPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      brandId: brands[0]?.id || "",
-      status: "PROSPECT",
-      startDate: "",
-      endDate: "",
-      scope: "",
-      benefits: "",
-      notes: "",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        brandId: brands[0]?.id || "",
-        status: "PROSPECT",
-        startDate: "",
-        endDate: "",
-        scope: "",
-        benefits: "",
-        notes: "",
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, brands, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -113,9 +114,11 @@ export function CreatePartnershipDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Partnership</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Partnership" : "Add Partnership"}</DialogTitle>
           <DialogDescription>
-            Define a formal partnership scope and timeline for a selected brand.
+            {mode === "edit"
+              ? "Update partnership scope, timeline, and commercial details."
+              : "Define a formal partnership scope and timeline for a selected brand."}
           </DialogDescription>
         </DialogHeader>
 
@@ -126,6 +129,7 @@ export function CreatePartnershipDialog({
               <Select
                 value={form.watch("brandId")}
                 onValueChange={(value) => form.setValue("brandId", value, { shouldValidate: true })}
+                disabled={mode === "edit"}
               >
                 <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
                   <SelectValue placeholder="Select brand" />
@@ -215,7 +219,7 @@ export function CreatePartnershipDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Add Partnership</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Add Partnership"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

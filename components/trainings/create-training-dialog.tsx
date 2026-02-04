@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -46,6 +46,8 @@ interface CreateTrainingDialogProps {
   organizationId?: string
   organizationName?: string
   events: EventOption[]
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateTrainingPayload>
   onCreate: (payload: CreateTrainingPayload) => void
 }
 
@@ -66,36 +68,34 @@ export function CreateTrainingDialog({
   organizationId,
   organizationName,
   events,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreateTrainingDialogProps) {
+  const defaultValues = useMemo<CreateTrainingPayload>(
+    () => ({
+      organizationId: initialValues?.organizationId ?? organizationId ?? "",
+      relatedEventId: initialValues?.relatedEventId ?? null,
+      title: initialValues?.title ?? "",
+      description: initialValues?.description ?? "",
+      dateTime: initialValues?.dateTime ?? "",
+      location: initialValues?.location ?? "",
+      mandatory: initialValues?.mandatory ?? false,
+      capacity: initialValues?.capacity,
+    }),
+    [initialValues, organizationId]
+  )
+
   const form = useForm<CreateTrainingPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      organizationId: organizationId ?? "",
-      relatedEventId: null,
-      title: "",
-      description: "",
-      dateTime: "",
-      location: "",
-      mandatory: false,
-      capacity: undefined,
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        organizationId: organizationId ?? "",
-        relatedEventId: null,
-        title: "",
-        description: "",
-        dateTime: "",
-        location: "",
-        mandatory: false,
-        capacity: undefined,
-      })
+    if (open) {
+      form.reset(defaultValues)
     }
-  }, [open, organizationId, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
@@ -108,9 +108,11 @@ export function CreateTrainingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Create Training</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Training" : "Create Training"}</DialogTitle>
           <DialogDescription>
-            Plan a training session for staff and referee readiness.
+            {mode === "edit"
+              ? "Update training session details and attendance constraints."
+              : "Plan a training session for staff and referee readiness."}
           </DialogDescription>
         </DialogHeader>
 
@@ -215,7 +217,7 @@ export function CreateTrainingDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Training</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Training"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

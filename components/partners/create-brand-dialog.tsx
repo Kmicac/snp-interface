@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -15,10 +15,12 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { ImageUpload } from "@/components/shared/image-upload"
 
 export interface CreateBrandPayload {
   name: string
   logoUrl?: string
+  logoFile?: File | null
   websiteUrl?: string
   instagramUrl?: string
   contactName?: string
@@ -30,12 +32,13 @@ export interface CreateBrandPayload {
 interface CreateBrandDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateBrandPayload>
   onCreate: (payload: CreateBrandPayload) => void
 }
 
 const schema = z.object({
   name: z.string().trim().min(2, "Brand name is required"),
-  logoUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   websiteUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   instagramUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   contactName: z.string().optional(),
@@ -44,48 +47,57 @@ const schema = z.object({
   notes: z.string().optional(),
 })
 
-export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandDialogProps) {
+export function CreateBrandDialog({
+  open,
+  onOpenChange,
+  mode = "create",
+  initialValues,
+  onCreate,
+}: CreateBrandDialogProps) {
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [existingLogoUrl, setExistingLogoUrl] = useState<string | null>(null)
+
+  const defaultValues = useMemo<CreateBrandPayload>(
+    () => ({
+      name: initialValues?.name || "",
+      websiteUrl: initialValues?.websiteUrl || "",
+      instagramUrl: initialValues?.instagramUrl || "",
+      contactName: initialValues?.contactName || "",
+      contactEmail: initialValues?.contactEmail || "",
+      contactPhone: initialValues?.contactPhone || "",
+      notes: initialValues?.notes || "",
+      logoUrl: initialValues?.logoUrl,
+      logoFile: null,
+    }),
+    [initialValues]
+  )
+
   const form = useForm<CreateBrandPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      name: "",
-      logoUrl: "",
-      websiteUrl: "",
-      instagramUrl: "",
-      contactName: "",
-      contactEmail: "",
-      contactPhone: "",
-      notes: "",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        name: "",
-        logoUrl: "",
-        websiteUrl: "",
-        instagramUrl: "",
-        contactName: "",
-        contactEmail: "",
-        contactPhone: "",
-        notes: "",
-      })
+    if (open) {
+      form.reset(defaultValues)
+      setLogoFile(null)
+      setExistingLogoUrl(initialValues?.logoUrl ?? null)
     }
-  }, [open, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
   const handleSubmit = form.handleSubmit((data) => {
     onCreate({
       ...data,
-      logoUrl: data.logoUrl || undefined,
       websiteUrl: data.websiteUrl || undefined,
       instagramUrl: data.instagramUrl || undefined,
       contactName: data.contactName || undefined,
       contactEmail: data.contactEmail || undefined,
       contactPhone: data.contactPhone || undefined,
       notes: data.notes || undefined,
+      logoFile,
+      logoUrl: existingLogoUrl ?? undefined,
     })
     onOpenChange(false)
   })
@@ -94,9 +106,11 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Brand</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Brand" : "Add Brand"}</DialogTitle>
           <DialogDescription>
-            Register a new brand profile for partnerships and sponsorship planning.
+            {mode === "edit"
+              ? "Update brand details for partnerships and sponsorship planning."
+              : "Register a new brand profile for partnerships and sponsorship planning."}
           </DialogDescription>
         </DialogHeader>
 
@@ -111,14 +125,16 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-200">Logo URL</label>
-              <Input
-                {...form.register("logoUrl")}
-                placeholder="https://..."
-                className="bg-[#1A1A1F] border-[#2B2B30]"
+            <div className="space-y-2 md:col-span-2">
+              <ImageUpload
+                label="Brand logo"
+                description="Optional. Add a brand logo using drag and drop or file picker."
+                value={logoFile}
+                onChange={setLogoFile}
+                existingImageUrl={existingLogoUrl}
+                onClearExisting={() => setExistingLogoUrl(null)}
+                maxSizeMB={5}
               />
-              <p className="text-xs text-gray-500">Optional. Logo that will be shown for this brand and its sponsorships.</p>
             </div>
 
             <div className="space-y-2">
@@ -187,7 +203,7 @@ export function CreateBrandDialog({ open, onOpenChange, onCreate }: CreateBrandD
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Add Brand</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Add Brand"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

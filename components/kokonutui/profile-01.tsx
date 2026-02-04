@@ -3,10 +3,10 @@
 import React from "react"
 
 import { LogOut, Settings, User } from "lucide-react"
-import Image from "next/image"
 import Link from "next/link"
 import { useAuth } from "@/lib/context/auth-context"
 import { useRouter } from "next/navigation"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 interface MenuItem {
   label: string
@@ -22,6 +22,8 @@ interface Profile01Props {
 export default function Profile01({ avatar }: Profile01Props) {
   const { user, currentOrg, logout } = useAuth()
   const router = useRouter()
+  const avatarSrc = avatar || user?.avatarUrl || user?.avatar
+  const avatarFallback = user?.name?.trim()?.charAt(0)?.toUpperCase() || "U"
 
   const handleLogout = () => {
     logout()
@@ -47,13 +49,10 @@ export default function Profile01({ avatar }: Profile01Props) {
         <div className="relative px-6 pt-8 pb-6">
           <div className="flex items-center gap-4 mb-6">
             <div className="relative shrink-0">
-              <Image
-                src={avatar || "https://ferf1mheo22r9ira.public.blob.vercel-storage.com/avatar-01-n0x8HFv8EUetf9z6ht0wScJKoTHqf8.png"}
-                alt={user?.name || "User"}
-                width={56}
-                height={56}
-                className="rounded-full ring-4 ring-white dark:ring-zinc-900 object-cover"
-              />
+              <Avatar className="h-14 w-14 ring-4 ring-white dark:ring-zinc-900">
+                {avatarSrc ? <AvatarImage src={avatarSrc} alt={user?.name || "User"} /> : null}
+                <AvatarFallback>{avatarFallback}</AvatarFallback>
+              </Avatar>
               <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-900" />
             </div>
 

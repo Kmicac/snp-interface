@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Package, Search, MapPin, Plus } from "lucide-react"
+import { Package, Search, MapPin, Plus, Pencil } from "lucide-react"
 import { mockAssets } from "@/lib/mock-data"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -62,7 +62,9 @@ const initialAssets: AssetListItem[] = mockAssets.map((asset) => ({
 
 export default function AssetsPage() {
   const { toast } = useToast()
+  const canEdit = true
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingAsset, setEditingAsset] = useState<AssetListItem | null>(null)
   const [assets, setAssets] = useState<AssetListItem[]>(initialAssets)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
@@ -104,6 +106,37 @@ export default function AssetsPage() {
     toast({
       title: "Asset added",
       description: `${payload.name} was added to local mock data.`,
+    })
+  }
+
+  const handleEditAsset = (payload: CreateAssetPayload) => {
+    if (!editingAsset) return
+
+    console.log("Edit Asset payload", payload)
+
+    setAssets((prev) =>
+      prev.map((asset) =>
+        asset.id === editingAsset.id
+          ? {
+              ...asset,
+              category: payload.category,
+              name: payload.name,
+              assetTag: payload.assetTag,
+              serialNumber: payload.serialNumber,
+              quantity: payload.quantity,
+              status: payload.status,
+              condition: payload.condition,
+              location: payload.location,
+              notes: payload.notes,
+            }
+          : asset
+      )
+    )
+
+    setEditingAsset(null)
+    toast({
+      title: "Asset updated",
+      description: `${payload.name} was updated in local mock data.`,
     })
   }
 
@@ -200,6 +233,7 @@ export default function AssetsPage() {
                   <th className="px-6 py-4 font-medium">Condition</th>
                   <th className="px-6 py-4 font-medium">Qty</th>
                   <th className="px-6 py-4 font-medium">Location</th>
+                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -227,6 +261,14 @@ export default function AssetsPage() {
                         {asset.location}
                       </div>
                     </td>
+                    {canEdit && (
+                      <td className="px-6 py-4 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingAsset(asset)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -241,6 +283,30 @@ export default function AssetsPage() {
         onOpenChange={setIsDialogOpen}
         categories={categories}
         onCreate={handleCreateAsset}
+      />
+      <CreateAssetDialog
+        open={editingAsset !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingAsset(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingAsset
+            ? {
+                category: editingAsset.category,
+                name: editingAsset.name,
+                assetTag: editingAsset.assetTag,
+                serialNumber: editingAsset.serialNumber,
+                quantity: editingAsset.quantity,
+                status: editingAsset.status,
+                condition: editingAsset.condition,
+                location: editingAsset.location,
+                notes: editingAsset.notes,
+              }
+            : undefined
+        }
+        categories={categories}
+        onCreate={handleEditAsset}
       />
     </Layout>
   )

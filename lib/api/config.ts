@@ -50,4 +50,7 @@ export const API_ENDPOINTS = {
   kpisSummary: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/kpis/summary`,
   kpisOverdue: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/kpis/overdue`,
   kpisSlaBreaches: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/kpis/sla-breaches`,
+
+  // Files
+  filesUpload: '/files/upload',
 }

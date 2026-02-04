@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { ImageUpload } from "@/components/shared/image-upload"
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ export interface CreateSponsorshipPayload {
   tier: "TITLE" | "GOLD" | "SILVER" | "BRONZE" | "SUPPORT"
   status: "PROPOSED" | "NEGOTIATION" | "CONFIRMED" | "CANCELED"
   imageUrl?: string
+  imageFile?: File | null
   cashValue?: number
   inKindValue?: number
   benefits: string
@@ -51,6 +53,8 @@ interface CreateSponsorshipDialogProps {
   events: EventOption[]
   brands: BrandOption[]
   selectedEventId?: string
+  mode?: "create" | "edit"
+  initialValues?: Partial<CreateSponsorshipPayload>
   onCreate: (payload: CreateSponsorshipPayload) => void
 }
 
@@ -59,7 +63,6 @@ const schema = z.object({
   brandId: z.string().min(1, "Brand is required"),
   tier: z.enum(["TITLE", "GOLD", "SILVER", "BRONZE", "SUPPORT"]),
   status: z.enum(["PROPOSED", "NEGOTIATION", "CONFIRMED", "CANCELED"]),
-  imageUrl: z.string().url("Enter a valid URL").or(z.literal("")),
   cashValue: z.number().min(0).optional(),
   inKindValue: z.number().min(0).optional(),
   benefits: z.string().trim().min(4, "Benefits are required"),
@@ -72,46 +75,50 @@ export function CreateSponsorshipDialog({
   events,
   brands,
   selectedEventId,
+  mode = "create",
+  initialValues,
   onCreate,
 }: CreateSponsorshipDialogProps) {
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null)
+
+  const defaultValues = useMemo<CreateSponsorshipPayload>(
+    () => ({
+      eventId: initialValues?.eventId || selectedEventId || events[0]?.id || "",
+      brandId: initialValues?.brandId || brands[0]?.id || "",
+      tier: initialValues?.tier || "GOLD",
+      status: initialValues?.status || "PROPOSED",
+      cashValue: initialValues?.cashValue,
+      inKindValue: initialValues?.inKindValue,
+      benefits: initialValues?.benefits || "",
+      notes: initialValues?.notes || "",
+      imageUrl: initialValues?.imageUrl,
+      imageFile: null,
+    }),
+    [brands, events, initialValues, selectedEventId]
+  )
+
   const form = useForm<CreateSponsorshipPayload>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      eventId: selectedEventId || events[0]?.id || "",
-      brandId: brands[0]?.id || "",
-      tier: "GOLD",
-      status: "PROPOSED",
-      imageUrl: "",
-      cashValue: undefined,
-      inKindValue: undefined,
-      benefits: "",
-      notes: "",
-    },
+    defaultValues,
   })
 
   useEffect(() => {
-    if (!open) {
-      form.reset({
-        eventId: selectedEventId || events[0]?.id || "",
-        brandId: brands[0]?.id || "",
-        tier: "GOLD",
-        status: "PROPOSED",
-        imageUrl: "",
-        cashValue: undefined,
-        inKindValue: undefined,
-        benefits: "",
-        notes: "",
-      })
+    if (open) {
+      form.reset(defaultValues)
+      setImageFile(null)
+      setExistingImageUrl(initialValues?.imageUrl ?? null)
     }
-  }, [open, selectedEventId, events, brands, form])
+  }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
   const handleSubmit = form.handleSubmit((data) => {
     onCreate({
       ...data,
-      imageUrl: data.imageUrl || undefined,
       notes: data.notes || undefined,
+      imageFile,
+      imageUrl: existingImageUrl ?? undefined,
     })
     onOpenChange(false)
   })
@@ -120,9 +127,11 @@ export function CreateSponsorshipDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Sponsorship</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Edit Sponsorship" : "Add Sponsorship"}</DialogTitle>
           <DialogDescription>
-            Add a sponsorship proposal or confirmation linked to a brand and event.
+            {mode === "edit"
+              ? "Update sponsorship values, status, and deliverables."
+              : "Add a sponsorship proposal or confirmation linked to a brand and event."}
           </DialogDescription>
         </DialogHeader>
 
@@ -208,13 +217,15 @@ export function CreateSponsorshipDialog({
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-200">Event Banner URL</label>
-              <Input
-                {...form.register("imageUrl")}
-                placeholder="https://..."
-                className="bg-[#1A1A1F] border-[#2B2B30]"
+              <ImageUpload
+                label="Sponsor visual"
+                description="Optional. Add a sponsor banner or logo used in event views."
+                value={imageFile}
+                onChange={setImageFile}
+                existingImageUrl={existingImageUrl}
+                onClearExisting={() => setExistingImageUrl(null)}
+                maxSizeMB={5}
               />
-              <p className="text-xs text-gray-500">Optional. Image used on event pages for this sponsor.</p>
             </div>
 
             <div className="space-y-2">
@@ -272,7 +283,7 @@ export function CreateSponsorshipDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Add Sponsorship</Button>
+            <Button type="submit">{mode === "edit" ? "Save changes" : "Add Sponsorship"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

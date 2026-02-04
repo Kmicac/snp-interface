@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Trophy, DollarSign, Gift, Plus } from "lucide-react"
+import { Trophy, DollarSign, Gift, Plus, Pencil } from "lucide-react"
 import { mockSponsorsByTier } from "@/lib/mock-data"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
@@ -76,10 +76,19 @@ const tierOrder: SponsorshipTier[] = ["TITLE", "GOLD", "SILVER", "BRONZE", "SUPP
 export default function SponsorsPage() {
   const { events, currentEvent } = useAuth()
   const { toast } = useToast()
+  const canEdit = true
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingSponsorship, setEditingSponsorship] = useState<SponsorshipItem | null>(null)
   const [brands, setBrands] = useState<BrandItem[]>(initialBrands)
   const [sponsorships, setSponsorships] = useState<SponsorshipItem[]>(initialSponsorships)
+  const previewUrlsRef = useRef<string[]>([])
+
+  useEffect(() => {
+    return () => {
+      previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
 
   const sponsorKpis = useMemo(
     () => ({
@@ -101,9 +110,13 @@ export default function SponsorsPage() {
   }, [sponsorships])
 
   const handleCreateSponsorship = (payload: CreateSponsorshipPayload) => {
-    console.log("Create Sponsorship payload", payload)
+    console.log("Create Sponsorship payload", { ...payload, imageFile: payload.imageFile })
 
     const selectedBrand = brands.find((brand) => brand.id === payload.brandId)
+    const imageSource = payload.imageFile ? URL.createObjectURL(payload.imageFile) : payload.imageUrl
+    if (payload.imageFile && imageSource) {
+      previewUrlsRef.current.push(imageSource)
+    }
 
     const nextSponsorship: SponsorshipItem = {
       id: `sp-${Date.now()}`,
@@ -112,7 +125,7 @@ export default function SponsorsPage() {
       brandName: selectedBrand?.name ?? "Unknown brand",
       tier: payload.tier,
       status: payload.status,
-      imageUrl: payload.imageUrl,
+      imageUrl: imageSource,
       cashValue: payload.cashValue,
       inKindValue: payload.inKindValue,
       benefits: payload.benefits,
@@ -124,6 +137,43 @@ export default function SponsorsPage() {
     toast({
       title: "Sponsorship added",
       description: `${nextSponsorship.brandName} sponsorship was added to local mock data.`,
+    })
+  }
+
+  const handleEditSponsorship = (payload: CreateSponsorshipPayload) => {
+    if (!editingSponsorship) return
+
+    console.log("Edit Sponsorship payload", { ...payload, imageFile: payload.imageFile })
+    const selectedBrand = brands.find((brand) => brand.id === payload.brandId)
+    const imageSource = payload.imageFile ? URL.createObjectURL(payload.imageFile) : payload.imageUrl
+    if (payload.imageFile && imageSource) {
+      previewUrlsRef.current.push(imageSource)
+    }
+
+    setSponsorships((prev) =>
+      prev.map((sponsorship) =>
+        sponsorship.id === editingSponsorship.id
+          ? {
+              ...sponsorship,
+              eventId: payload.eventId,
+              brandId: payload.brandId,
+              brandName: selectedBrand?.name ?? sponsorship.brandName,
+              tier: payload.tier,
+              status: payload.status,
+              imageUrl: imageSource,
+              cashValue: payload.cashValue,
+              inKindValue: payload.inKindValue,
+              benefits: payload.benefits,
+              notes: payload.notes,
+            }
+          : sponsorship
+      )
+    )
+
+    setEditingSponsorship(null)
+    toast({
+      title: "Sponsorship updated",
+      description: `${selectedBrand?.name ?? "Sponsorship"} was updated in local mock data.`,
     })
   }
 
@@ -228,6 +278,14 @@ export default function SponsorsPage() {
                         key={sponsorship.id}
                         className="bg-[#1A1A1F] rounded-lg p-4 border border-[#2B2B30] hover:border-[#3B3B40] transition-colors min-w-[220px]"
                       >
+                        {canEdit && (
+                          <div className="mb-2 flex justify-end">
+                            <Button variant="ghost" size="sm" onClick={() => setEditingSponsorship(sponsorship)}>
+                              <Pencil className="mr-2 h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                          </div>
+                        )}
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10 rounded-none bg-transparent">
                             <AvatarImage
@@ -271,6 +329,32 @@ export default function SponsorsPage() {
         brands={brands}
         selectedEventId={currentEvent?.id}
         onCreate={handleCreateSponsorship}
+      />
+      <CreateSponsorshipDialog
+        open={editingSponsorship !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingSponsorship(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingSponsorship
+            ? {
+                eventId: editingSponsorship.eventId,
+                brandId: editingSponsorship.brandId,
+                tier: editingSponsorship.tier,
+                status: editingSponsorship.status,
+                imageUrl: editingSponsorship.imageUrl,
+                cashValue: editingSponsorship.cashValue,
+                inKindValue: editingSponsorship.inKindValue,
+                benefits: editingSponsorship.benefits,
+                notes: editingSponsorship.notes,
+              }
+            : undefined
+        }
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        brands={brands}
+        selectedEventId={currentEvent?.id}
+        onCreate={handleEditSponsorship}
       />
     </Layout>
   )

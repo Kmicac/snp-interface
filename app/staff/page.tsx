@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Users2, Search, Mail, Phone, Plus } from "lucide-react"
+import { Users2, Search, Mail, Phone, Plus, Pencil } from "lucide-react"
 import { mockStaff } from "@/lib/mock-data"
 import type { StaffRole, Staff } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
@@ -59,12 +59,31 @@ const roleMap: Record<CreateStaffPayload["role"], StaffRole> = {
   OTHER: "volunteer",
 }
 
+const formRoleFromStaff: Record<StaffRole, CreateStaffPayload["role"]> = {
+  admin: "STAFF",
+  security: "SECURITY",
+  logistics: "LOGISTICS",
+  cleaning: "CLEANING",
+  referee: "REFEREE",
+  medical: "MEDIC",
+  volunteer: "OTHER",
+}
+
 export default function StaffPage() {
   const { toast } = useToast()
+  const canEdit = true
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingStaff, setEditingStaff] = useState<StaffListItem | null>(null)
   const [staffList, setStaffList] = useState<StaffListItem[]>(initialStaff)
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
+  const previewUrlsRef = useRef<string[]>([])
+
+  useEffect(() => {
+    return () => {
+      previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
 
   const filteredStaff = useMemo(
     () =>
@@ -80,7 +99,12 @@ export default function StaffPage() {
   )
 
   const handleCreateStaff = (payload: CreateStaffPayload) => {
-    console.log("Create Staff payload", payload)
+    console.log("Create Staff payload", { ...payload, photoFile: payload.photoFile })
+
+    const avatarPreviewUrl = payload.photoFile ? URL.createObjectURL(payload.photoFile) : payload.avatarUrl
+    if (avatarPreviewUrl) {
+      previewUrlsRef.current.push(avatarPreviewUrl)
+    }
 
     const nextStaff: StaffListItem = {
       id: `st-${Date.now()}`,
@@ -90,7 +114,7 @@ export default function StaffPage() {
       roles: [roleMap[payload.role]],
       notes: payload.notes,
       documentId: payload.documentId,
-      avatarUrl: payload.avatarUrl,
+      avatarUrl: avatarPreviewUrl,
     }
 
     setStaffList((prev) => [nextStaff, ...prev])
@@ -98,6 +122,40 @@ export default function StaffPage() {
     toast({
       title: "Staff member added",
       description: `${payload.fullName} was added to local mock data.`,
+    })
+  }
+
+  const handleEditStaff = (payload: CreateStaffPayload) => {
+    if (!editingStaff) return
+
+    console.log("Edit Staff payload", { ...payload, photoFile: payload.photoFile })
+
+    const avatarPreviewUrl = payload.photoFile ? URL.createObjectURL(payload.photoFile) : payload.avatarUrl
+    if (payload.photoFile && avatarPreviewUrl) {
+      previewUrlsRef.current.push(avatarPreviewUrl)
+    }
+
+    setStaffList((prev) =>
+      prev.map((member) =>
+        member.id === editingStaff.id
+          ? {
+              ...member,
+              name: payload.fullName,
+              email: payload.email || member.email,
+              phone: payload.phone,
+              documentId: payload.documentId,
+              notes: payload.notes,
+              roles: [roleMap[payload.role]],
+              avatarUrl: avatarPreviewUrl,
+            }
+          : member
+      )
+    )
+
+    setEditingStaff(null)
+    toast({
+      title: "Staff member updated",
+      description: `${payload.fullName} was updated in local mock data.`,
     })
   }
 
@@ -185,6 +243,7 @@ export default function StaffPage() {
                   <th className="px-6 py-4 font-medium">Contact</th>
                   <th className="px-6 py-4 font-medium">Roles</th>
                   <th className="px-6 py-4 font-medium">Notes</th>
+                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -231,6 +290,14 @@ export default function StaffPage() {
                     <td className="px-6 py-4">
                       <span className="text-sm text-gray-400">{staffMember.notes || "-"}</span>
                     </td>
+                    {canEdit && (
+                      <td className="px-6 py-4 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingStaff(staffMember)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -241,6 +308,27 @@ export default function StaffPage() {
       </div>
 
       <CreateStaffDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} onCreate={handleCreateStaff} />
+      <CreateStaffDialog
+        open={editingStaff !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingStaff(null)
+        }}
+        mode="edit"
+        initialValues={
+          editingStaff
+            ? {
+                fullName: editingStaff.name,
+                documentId: editingStaff.documentId,
+                phone: editingStaff.phone,
+                email: editingStaff.email,
+                role: formRoleFromStaff[editingStaff.roles[0] ?? "volunteer"],
+                notes: editingStaff.notes,
+                avatarUrl: editingStaff.avatarUrl,
+              }
+            : undefined
+        }
+        onCreate={handleEditStaff}
+      />
     </Layout>
   )
 }

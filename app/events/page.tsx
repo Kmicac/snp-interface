@@ -5,7 +5,7 @@ import Layout from "@/components/kokonutui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, MapPin, ClipboardList, AlertTriangle, Trophy, Plus } from "lucide-react"
+import { Calendar, MapPin, ClipboardList, AlertTriangle, Trophy, Plus, Pencil } from "lucide-react"
 import Link from "next/link"
 import type { Event } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
@@ -81,10 +81,22 @@ function resolveEventStatus(startDate: string, endDate: string): Event["status"]
   return now < start ? "upcoming" : "past"
 }
 
+function toDateTimeInput(value: string): string {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
+    2,
+    "0"
+  )}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
 export default function EventsPage() {
   const { currentOrg } = useAuth()
   const { toast } = useToast()
+  const canEdit = true
   const [createOpen, setCreateOpen] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<EventListItem | null>(null)
   const [events, setEvents] = useState<EventListItem[]>(initialEvents)
 
   const upcomingEvents = useMemo(
@@ -118,6 +130,33 @@ export default function EventsPage() {
     })
   }
 
+  const handleEditEvent = (payload: CreateEventPayload) => {
+    if (!editingEvent) return
+
+    console.log("Edit Event payload", payload)
+
+    setEvents((prev) =>
+      prev.map((event) =>
+        event.id === editingEvent.id
+          ? {
+              ...event,
+              name: payload.name,
+              startDate: payload.startDate,
+              endDate: payload.endDate,
+              venue: payload.venue,
+              status: resolveEventStatus(payload.startDate, payload.endDate),
+            }
+          : event
+      )
+    )
+
+    setEditingEvent(null)
+    toast({
+      title: "Event updated",
+      description: `${payload.name} was updated in local mock data.`,
+    })
+  }
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "live":
@@ -132,8 +171,19 @@ export default function EventsPage() {
   }
 
   const EventCard = ({ event }: { event: EventListItem }) => (
-    <Link href={`/events/${event.id}`}>
-      <div className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors cursor-pointer">
+    <div className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors">
+      <div className="flex items-start justify-end gap-2 mb-3">
+        <Button asChild variant="ghost" size="sm">
+          <Link href={`/events/${event.id}`}>View</Link>
+        </Button>
+        {canEdit && (
+          <Button variant="ghost" size="sm" onClick={() => setEditingEvent(event)}>
+            <Pencil className="mr-2 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        )}
+      </div>
+      <div>
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-lg font-semibold text-white">{event.name}</h3>
@@ -183,7 +233,7 @@ export default function EventsPage() {
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   )
 
   return (
@@ -247,6 +297,28 @@ export default function EventsPage() {
         organizationId={currentOrg?.id}
         organizationName={currentOrg?.name}
         onCreate={handleCreateEvent}
+      />
+      <CreateEventDialog
+        open={editingEvent !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingEvent(null)
+        }}
+        mode="edit"
+        organizationId={currentOrg?.id}
+        organizationName={currentOrg?.name}
+        initialValues={
+          editingEvent
+            ? {
+                organizationId: currentOrg?.id ?? "",
+                code: editingEvent.code,
+                name: editingEvent.name,
+                startDate: toDateTimeInput(editingEvent.startDate),
+                endDate: toDateTimeInput(editingEvent.endDate),
+                venue: editingEvent.venue,
+              }
+            : undefined
+        }
+        onCreate={handleEditEvent}
       />
     </Layout>
   )

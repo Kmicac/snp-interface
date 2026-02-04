@@ -4,7 +4,7 @@ import { useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Dumbbell, Calendar, Users2, AlertCircle, Plus, MapPin, Clock } from "lucide-react"
+import { Dumbbell, Calendar, Users2, AlertCircle, Plus, MapPin, Clock, Pencil } from "lucide-react"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -75,8 +75,10 @@ const initialTrainings: TrainingItem[] = [
 export default function TrainingsPage() {
   const { currentOrg, events } = useAuth()
   const { toast } = useToast()
+  const canEdit = true
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingTraining, setEditingTraining] = useState<TrainingItem | null>(null)
   const [trainings, setTrainings] = useState<TrainingItem[]>(initialTrainings)
 
   const handleCreateTraining = (payload: CreateTrainingPayload) => {
@@ -100,6 +102,36 @@ export default function TrainingsPage() {
     toast({
       title: "Training created",
       description: `${payload.title} was added to local mock data.`,
+    })
+  }
+
+  const handleEditTraining = (payload: CreateTrainingPayload) => {
+    if (!editingTraining) return
+
+    console.log("Edit Training payload", payload)
+
+    setTrainings((prev) =>
+      prev.map((training) =>
+        training.id === editingTraining.id
+          ? {
+              ...training,
+              title: payload.title,
+              description: payload.description,
+              dateTime: payload.dateTime,
+              location: payload.location,
+              mandatory: payload.mandatory,
+              eventId: payload.relatedEventId ?? undefined,
+              capacity: payload.capacity,
+              attendeesCount: payload.capacity ?? training.attendeesCount,
+            }
+          : training
+      )
+    )
+
+    setEditingTraining(null)
+    toast({
+      title: "Training updated",
+      description: `${payload.title} was updated in local mock data.`,
     })
   }
 
@@ -133,6 +165,14 @@ export default function TrainingsPage() {
                 key={training.id}
                 className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors"
               >
+                {canEdit && (
+                  <div className="mb-3 flex justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => setEditingTraining(training)}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                  </div>
+                )}
                 <div className="flex items-start justify-between mb-4">
                   <h3 className="text-lg font-semibold text-white">{training.title}</h3>
                   {training.mandatory && (
@@ -209,6 +249,31 @@ export default function TrainingsPage() {
         organizationName={currentOrg?.name}
         events={events.map((event) => ({ id: event.id, name: event.name }))}
         onCreate={handleCreateTraining}
+      />
+      <CreateTrainingDialog
+        open={editingTraining !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingTraining(null)
+        }}
+        mode="edit"
+        organizationId={currentOrg?.id}
+        organizationName={currentOrg?.name}
+        initialValues={
+          editingTraining
+            ? {
+                organizationId: currentOrg?.id ?? "",
+                relatedEventId: editingTraining.eventId ?? null,
+                title: editingTraining.title,
+                description: editingTraining.description ?? "",
+                dateTime: editingTraining.dateTime,
+                location: editingTraining.location,
+                mandatory: editingTraining.mandatory,
+                capacity: editingTraining.capacity,
+              }
+            : undefined
+        }
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        onCreate={handleEditTraining}
       />
     </Layout>
   )
