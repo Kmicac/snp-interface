@@ -1,73 +1,49 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Plus } from "lucide-react"
+import { useRouter } from "next/navigation"
+
 import Layout from "@/components/kokonutui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, MapPin, ClipboardList, AlertTriangle, Trophy, Plus, Pencil } from "lucide-react"
-import Link from "next/link"
+import { EventCard } from "@/components/events/event-card"
 import type { Event } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
+import { mockAssets, mockEvents, mockStaff } from "@/lib/mock-data"
 import { CreateEventDialog, type CreateEventPayload } from "@/components/events/create-event-dialog"
+import { EventResourcesDialog } from "@/components/events/event-resources-dialog"
 
 type EventListItem = Event & {
   workOrdersCount: number
   incidentsCount: number
   sponsorsCount: number
+  staffAssignedCount: number
+  assetsAssignedCount: number
 }
 
-const initialEvents: EventListItem[] = [
+type EventAssignmentsState = Record<
+  string,
   {
-    id: "evt-1",
-    name: "ADCC LATAM 2025",
-    code: "ADCC_LATAM_2025",
-    startDate: "2025-03-15",
-    endDate: "2025-03-16",
-    venue: "Movistar Arena, Santiago",
-    status: "upcoming",
-    workOrdersCount: 45,
-    incidentsCount: 0,
-    sponsorsCount: 12,
-  },
-  {
-    id: "evt-2",
-    name: "Open Chile 2025",
-    code: "OPEN_CHILE_2025",
-    startDate: "2025-04-20",
-    endDate: "2025-04-21",
-    venue: "Centro de Eventos, Valparaiso",
-    status: "upcoming",
-    workOrdersCount: 28,
-    incidentsCount: 0,
-    sponsorsCount: 8,
-  },
-  {
-    id: "evt-3",
-    name: "Nacional BJJ 2024",
-    code: "NACIONAL_BJJ_2024",
-    startDate: "2024-11-10",
-    endDate: "2024-11-11",
-    venue: "Estadio Nacional, Santiago",
-    status: "past",
-    workOrdersCount: 52,
-    incidentsCount: 3,
-    sponsorsCount: 15,
-  },
-  {
-    id: "evt-4",
-    name: "Copa Sur 2024",
-    code: "COPA_SUR_2024",
-    startDate: "2024-09-15",
-    endDate: "2024-09-15",
-    venue: "Gimnasio Municipal, Concepcion",
-    status: "past",
-    workOrdersCount: 20,
-    incidentsCount: 1,
-    sponsorsCount: 5,
-  },
-]
+    staffIds: string[]
+    assetIds: string[]
+  }
+>
+
+const eventMetricsById: Record<string, Pick<EventListItem, "workOrdersCount" | "incidentsCount" | "sponsorsCount">> = {
+  "evt-1": { workOrdersCount: 45, incidentsCount: 0, sponsorsCount: 12 },
+  "evt-2": { workOrdersCount: 28, incidentsCount: 0, sponsorsCount: 8 },
+  "evt-3": { workOrdersCount: 52, incidentsCount: 3, sponsorsCount: 15 },
+  "evt-4": { workOrdersCount: 20, incidentsCount: 1, sponsorsCount: 5 },
+}
+
+const initialEventAssignments: EventAssignmentsState = {
+  "evt-1": { staffIds: ["st-1", "st-2", "st-4"], assetIds: ["as-1", "as-3", "as-5"] },
+  "evt-2": { staffIds: ["st-2", "st-3"], assetIds: ["as-1", "as-4"] },
+  "evt-3": { staffIds: ["st-1", "st-3", "st-5"], assetIds: ["as-2", "as-3", "as-5"] },
+  "evt-4": { staffIds: ["st-5"], assetIds: ["as-4"] },
+}
 
 function resolveEventStatus(startDate: string, endDate: string): Event["status"] {
   const now = new Date()
@@ -91,13 +67,33 @@ function toDateTimeInput(value: string): string {
   )}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
+const initialEvents: EventListItem[] = mockEvents.map((event) => ({
+  ...event,
+  status: resolveEventStatus(event.startDate, event.endDate),
+  workOrdersCount: eventMetricsById[event.id]?.workOrdersCount ?? 0,
+  incidentsCount: eventMetricsById[event.id]?.incidentsCount ?? 0,
+  sponsorsCount: eventMetricsById[event.id]?.sponsorsCount ?? 0,
+  staffAssignedCount: initialEventAssignments[event.id]?.staffIds.length ?? 0,
+  assetsAssignedCount: initialEventAssignments[event.id]?.assetIds.length ?? 0,
+}))
+
 export default function EventsPage() {
+  const router = useRouter()
   const { currentOrg } = useAuth()
   const { toast } = useToast()
   const canEdit = true
   const [createOpen, setCreateOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<EventListItem | null>(null)
+  const [assigningEvent, setAssigningEvent] = useState<EventListItem | null>(null)
   const [events, setEvents] = useState<EventListItem[]>(initialEvents)
+  const [eventAssignments, setEventAssignments] = useState<EventAssignmentsState>(initialEventAssignments)
+  const previewUrlsRef = useRef<string[]>([])
+
+  useEffect(() => {
+    return () => {
+      previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
 
   const upcomingEvents = useMemo(
     () => events.filter((event) => event.status === "upcoming" || event.status === "live"),
@@ -107,22 +103,41 @@ export default function EventsPage() {
   const pastEvents = useMemo(() => events.filter((event) => event.status === "past"), [events])
 
   const handleCreateEvent = (payload: CreateEventPayload) => {
-    console.log("Create Event payload", payload)
+    console.log("Create Event payload", { ...payload, imageFile: payload.imageFile })
+
+    const createdAt = Date.now()
+    const imageSource = payload.imageFile ? URL.createObjectURL(payload.imageFile) : payload.imageUrl
+    if (payload.imageFile && imageSource) {
+      previewUrlsRef.current.push(imageSource)
+    }
 
     const nextEvent: EventListItem = {
-      id: `evt-${Date.now()}`,
+      id: `evt-${createdAt}`,
       name: payload.name,
       code: payload.code,
       startDate: payload.startDate,
       endDate: payload.endDate,
       venue: payload.venue,
       status: resolveEventStatus(payload.startDate, payload.endDate),
+      imageUrl: imageSource ?? undefined,
+      imageKey: payload.imageFile
+        ? `events/mock-${createdAt}-${payload.imageFile.name}`
+        : (payload.imageKey ?? undefined),
       workOrdersCount: 0,
       incidentsCount: 0,
       sponsorsCount: 0,
+      staffAssignedCount: 0,
+      assetsAssignedCount: 0,
     }
 
     setEvents((prev) => [nextEvent, ...prev])
+    setEventAssignments((prev) => ({
+      ...prev,
+      [nextEvent.id]: {
+        staffIds: [],
+        assetIds: [],
+      },
+    }))
 
     toast({
       title: "Event created",
@@ -133,7 +148,19 @@ export default function EventsPage() {
   const handleEditEvent = (payload: CreateEventPayload) => {
     if (!editingEvent) return
 
-    console.log("Edit Event payload", payload)
+    console.log("Update Event payload", {
+      ...payload,
+      imageFile: payload.imageFile,
+      clearedImage: Boolean(payload.clearedImage),
+    })
+
+    const updatedAt = Date.now()
+    let imageSource = payload.imageUrl
+
+    if (payload.imageFile) {
+      imageSource = URL.createObjectURL(payload.imageFile)
+      previewUrlsRef.current.push(imageSource)
+    }
 
     setEvents((prev) =>
       prev.map((event) =>
@@ -145,6 +172,12 @@ export default function EventsPage() {
               endDate: payload.endDate,
               venue: payload.venue,
               status: resolveEventStatus(payload.startDate, payload.endDate),
+              imageUrl: payload.clearedImage ? undefined : (imageSource ?? undefined),
+              imageKey: payload.clearedImage
+                ? undefined
+                : payload.imageFile
+                  ? `events/mock-${updatedAt}-${payload.imageFile.name}`
+                  : (payload.imageKey ?? event.imageKey),
             }
           : event
       )
@@ -157,84 +190,40 @@ export default function EventsPage() {
     })
   }
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "live":
-        return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Live</Badge>
-      case "upcoming":
-        return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Upcoming</Badge>
-      case "past":
-        return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">Completed</Badge>
-      default:
-        return null
-    }
+  const handleSaveEventAssignments = (payload: { staffIds: string[]; assetIds: string[] }) => {
+    if (!assigningEvent) return
+
+    console.log("Update Event resource assignments", {
+      eventId: assigningEvent.id,
+      staffIds: payload.staffIds,
+      assetIds: payload.assetIds,
+    })
+
+    setEventAssignments((prev) => ({
+      ...prev,
+      [assigningEvent.id]: {
+        staffIds: payload.staffIds,
+        assetIds: payload.assetIds,
+      },
+    }))
+
+    setEvents((prev) =>
+      prev.map((event) =>
+        event.id === assigningEvent.id
+          ? {
+              ...event,
+              staffAssignedCount: payload.staffIds.length,
+              assetsAssignedCount: payload.assetIds.length,
+            }
+          : event
+      )
+    )
+
+    toast({
+      title: "Resources assigned",
+      description: `${payload.staffIds.length} staff and ${payload.assetIds.length} assets assigned to ${assigningEvent.name}.`,
+    })
   }
-
-  const EventCard = ({ event }: { event: EventListItem }) => (
-    <div className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors">
-      <div className="flex items-start justify-end gap-2 mb-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link href={`/events/${event.id}`}>View</Link>
-        </Button>
-        {canEdit && (
-          <Button variant="ghost" size="sm" onClick={() => setEditingEvent(event)}>
-            <Pencil className="mr-2 h-3.5 w-3.5" />
-            Edit
-          </Button>
-        )}
-      </div>
-      <div>
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-white">{event.name}</h3>
-            <p className="text-sm text-gray-500 font-mono">{event.code}</p>
-          </div>
-          {getStatusBadge(event.status)}
-        </div>
-
-        <div className="space-y-2 mb-4">
-          <div className="flex items-center gap-2 text-gray-400 text-sm">
-            <Calendar className="w-4 h-4" />
-            <span>
-              {new Date(event.startDate).toLocaleDateString("es-CL", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
-              {event.endDate !== event.startDate && (
-                <>
-                  {" - "}
-                  {new Date(event.endDate).toLocaleDateString("es-CL", {
-                    day: "numeric",
-                    month: "short",
-                  })}
-                </>
-              )}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-gray-400 text-sm">
-            <MapPin className="w-4 h-4" />
-            <span>{event.venue}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 pt-4 border-t border-[#1F1F23]">
-          <div className="flex items-center gap-1 text-sm">
-            <ClipboardList className="w-4 h-4 text-blue-400" />
-            <span className="text-gray-300">{event.workOrdersCount}</span>
-          </div>
-          <div className="flex items-center gap-1 text-sm">
-            <AlertTriangle className="w-4 h-4 text-orange-400" />
-            <span className="text-gray-300">{event.incidentsCount}</span>
-          </div>
-          <div className="flex items-center gap-1 text-sm">
-            <Trophy className="w-4 h-4 text-yellow-400" />
-            <span className="text-gray-300">{event.sponsorsCount}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 
   return (
     <Layout>
@@ -242,7 +231,7 @@ export default function EventsPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">Events</h1>
-            <p className="text-gray-500 mt-1">Manage and view all your events</p>
+            <p className="mt-1 text-gray-500">Manage and view all your events</p>
             {!currentOrg && (
               <p className="mt-2 text-sm text-amber-400">Select an organization to create events.</p>
             )}
@@ -254,39 +243,53 @@ export default function EventsPage() {
         </div>
 
         <Tabs defaultValue="upcoming" className="w-full">
-          <TabsList className="bg-[#1A1A1F] border border-[#2B2B30]">
+          <TabsList className="border border-[#2B2B30] bg-[#1A1A1F]">
             <TabsTrigger
               value="upcoming"
-              className="data-[state=active]:bg-[#2B2B30] text-gray-300 data-[state=active]:text-white"
+              className="text-gray-300 data-[state=active]:bg-[#2B2B30] data-[state=active]:text-white"
             >
               Upcoming / Active ({upcomingEvents.length})
             </TabsTrigger>
             <TabsTrigger
               value="past"
-              className="data-[state=active]:bg-[#2B2B30] text-gray-300 data-[state=active]:text-white"
+              className="text-gray-300 data-[state=active]:bg-[#2B2B30] data-[state=active]:text-white"
             >
               Past ({pastEvents.length})
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="upcoming" className="mt-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {upcomingEvents.map((event) => (
-                <EventCard key={event.id} event={event} />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  canEdit={canEdit}
+                  onOpen={() => router.push(`/events/${event.id}`)}
+                  onEdit={() => setEditingEvent(event)}
+                  onManageAssignments={() => setAssigningEvent(event)}
+                />
               ))}
             </div>
             {upcomingEvents.length === 0 && (
-              <div className="text-center py-12 text-gray-500">No upcoming events</div>
+              <div className="py-12 text-center text-gray-500">No upcoming events</div>
             )}
           </TabsContent>
 
           <TabsContent value="past" className="mt-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {pastEvents.map((event) => (
-                <EventCard key={event.id} event={event} />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  canEdit={canEdit}
+                  onOpen={() => router.push(`/events/${event.id}`)}
+                  onEdit={() => setEditingEvent(event)}
+                  onManageAssignments={() => setAssigningEvent(event)}
+                />
               ))}
             </div>
-            {pastEvents.length === 0 && <div className="text-center py-12 text-gray-500">No past events</div>}
+            {pastEvents.length === 0 && <div className="py-12 text-center text-gray-500">No past events</div>}
           </TabsContent>
         </Tabs>
       </div>
@@ -315,10 +318,25 @@ export default function EventsPage() {
                 startDate: toDateTimeInput(editingEvent.startDate),
                 endDate: toDateTimeInput(editingEvent.endDate),
                 venue: editingEvent.venue,
+                imageUrl: editingEvent.imageUrl,
+                imageKey: editingEvent.imageKey,
               }
             : undefined
         }
         onCreate={handleEditEvent}
+      />
+
+      <EventResourcesDialog
+        open={assigningEvent !== null}
+        onOpenChange={(open) => {
+          if (!open) setAssigningEvent(null)
+        }}
+        eventName={assigningEvent?.name}
+        staffOptions={mockStaff}
+        assetOptions={mockAssets}
+        initialStaffIds={assigningEvent ? eventAssignments[assigningEvent.id]?.staffIds ?? [] : []}
+        initialAssetIds={assigningEvent ? eventAssignments[assigningEvent.id]?.assetIds ?? [] : []}
+        onSave={handleSaveEventAssignments}
       />
     </Layout>
   )

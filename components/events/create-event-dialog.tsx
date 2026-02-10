@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ImageUpload } from "@/components/shared/image-upload"
 
 export interface CreateEventPayload {
   organizationId: string
@@ -22,6 +23,10 @@ export interface CreateEventPayload {
   startDate: string
   endDate: string
   venue: string
+  imageUrl?: string
+  imageKey?: string
+  imageFile?: File | null
+  clearedImage?: boolean
 }
 
 interface CreateEventDialogProps {
@@ -57,6 +62,10 @@ export function CreateEventDialog({
   initialValues,
   onCreate,
 }: CreateEventDialogProps) {
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null)
+  const [existingImageKey, setExistingImageKey] = useState<string | null>(null)
+
   const defaultValues = useMemo<CreateEventPayload>(
     () => ({
       organizationId: initialValues?.organizationId ?? organizationId ?? "",
@@ -65,6 +74,10 @@ export function CreateEventDialog({
       startDate: initialValues?.startDate ?? "",
       endDate: initialValues?.endDate ?? "",
       venue: initialValues?.venue ?? "",
+      imageUrl: initialValues?.imageUrl,
+      imageKey: initialValues?.imageKey,
+      imageFile: null,
+      clearedImage: false,
     }),
     [initialValues, organizationId]
   )
@@ -77,13 +90,25 @@ export function CreateEventDialog({
   useEffect(() => {
     if (open) {
       form.reset(defaultValues)
+      setImageFile(null)
+      setExistingImageUrl(initialValues?.imageUrl ?? null)
+      setExistingImageKey(initialValues?.imageKey ?? null)
     }
   }, [open])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
   const handleSubmit = form.handleSubmit((data) => {
-    onCreate(data)
+    const hadInitialImage = Boolean(initialValues?.imageUrl || initialValues?.imageKey)
+    const clearedImage = mode === "edit" && hadInitialImage && !existingImageUrl && !imageFile
+
+    onCreate({
+      ...data,
+      imageFile,
+      imageUrl: existingImageUrl ?? undefined,
+      imageKey: existingImageUrl ? existingImageKey ?? undefined : undefined,
+      clearedImage,
+    })
     onOpenChange(false)
   })
 
@@ -157,6 +182,21 @@ export function CreateEventDialog({
                 {...form.register("venue")}
                 placeholder="Parque Olimpico de la Juventud, Buenos Aires, Argentina"
                 className="bg-[#1A1A1F] border-[#2B2B30]"
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <ImageUpload
+                label="Event image / flyer"
+                description="Optional. Upload a flyer or hero image for event cards and event details."
+                value={imageFile}
+                onChange={setImageFile}
+                existingImageUrl={existingImageUrl}
+                onClearExisting={() => {
+                  setExistingImageUrl(null)
+                  setExistingImageKey(null)
+                }}
+                maxSizeMB={5}
               />
             </div>
           </div>

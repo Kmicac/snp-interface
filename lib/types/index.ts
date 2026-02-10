@@ -37,6 +37,8 @@ export interface Event {
   venue: string
   status: 'upcoming' | 'live' | 'past'
   description?: string
+  imageUrl?: string
+  imageKey?: string
 }
 
 export interface Zone {

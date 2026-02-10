@@ -1,6 +1,6 @@
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/api/config"
 
-export type UploadFolder = "staff" | "brands" | "sponsors" | (string & {})
+export type UploadFolder = "staff" | "brands" | "sponsors" | "events" | (string & {})
 
 export interface UploadResponse {
   url: string

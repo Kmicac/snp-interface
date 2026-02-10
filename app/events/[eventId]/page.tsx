@@ -4,6 +4,7 @@ import Layout from "@/components/kokonutui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { AspectRatio } from "@/components/ui/aspect-ratio"
 import {
   Calendar,
   MapPin,
@@ -22,23 +23,35 @@ import IncidentsCard from "@/components/dashboard/incidents-card"
 import SponsorsCard from "@/components/dashboard/sponsors-card"
 import StaffSummaryCard from "@/components/dashboard/staff-summary-card"
 import InventoryAlertsCard from "@/components/dashboard/inventory-alerts-card"
+import { mockAssets, mockEvents, mockStaff } from "@/lib/mock-data"
 
-// Mock event data
-const mockEvent = {
+const fallbackEvent = {
   id: "evt-1",
   name: "ADCC LATAM 2025",
   code: "ADCC_LATAM_2025",
-  startDate: "2025-03-15",
-  endDate: "2025-03-16",
-  venue: "Movistar Arena, Santiago",
+  startDate: "2025-03-15T09:00:00",
+  endDate: "2025-03-16T20:00:00",
+  venue: "Movistar Arena, Santiago, Chile",
   status: "upcoming" as const,
   description: "The largest ADCC event in Latin America featuring top grapplers from across the region.",
+  imageUrl:
+    "https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1200&q=80",
+}
+
+const eventResourceAssignments: Record<string, { staffIds: string[]; assetIds: string[] }> = {
+  "evt-1": { staffIds: ["st-1", "st-2", "st-4"], assetIds: ["as-1", "as-3", "as-5"] },
+  "evt-2": { staffIds: ["st-2", "st-3"], assetIds: ["as-1", "as-4"] },
+  "evt-3": { staffIds: ["st-1", "st-3", "st-5"], assetIds: ["as-2", "as-3", "as-5"] },
+  "evt-4": { staffIds: ["st-5"], assetIds: ["as-4"] },
 }
 
 export default function EventDetailPage() {
   const params = useParams()
   const eventId = params.eventId as string
-  const event = mockEvent // In production, fetch by eventId
+  const event = mockEvents.find((item) => item.id === eventId) ?? fallbackEvent
+  const assignedResources = eventResourceAssignments[event.id] ?? { staffIds: [], assetIds: [] }
+  const assignedStaff = mockStaff.filter((staff) => assignedResources.staffIds.includes(staff.id))
+  const assignedAssets = mockAssets.filter((asset) => assignedResources.assetIds.includes(asset.id))
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -56,6 +69,18 @@ export default function EventDetailPage() {
   return (
     <Layout>
       <div className="space-y-6">
+        <div className="overflow-hidden rounded-xl border border-[#1F1F23] bg-[#0F0F12]">
+          <AspectRatio ratio={21 / 9}>
+            {event.imageUrl ? (
+              <img src={event.imageUrl} alt={`${event.name} flyer`} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#161923] via-[#12151F] to-[#0E1018] text-gray-400">
+                No flyer uploaded
+              </div>
+            )}
+          </AspectRatio>
+        </div>
+
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
@@ -85,6 +110,14 @@ export default function EventDetailPage() {
                 <MapPin className="w-4 h-4" />
                 <span>{event.venue}</span>
               </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge className="border-blue-500/30 bg-blue-500/20 text-blue-300">
+                {assignedStaff.length} staff assigned
+              </Badge>
+              <Badge className="border-emerald-500/30 bg-emerald-500/20 text-emerald-300">
+                {assignedAssets.length} assets assigned
+              </Badge>
             </div>
           </div>
         </div>
