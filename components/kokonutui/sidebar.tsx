@@ -16,18 +16,18 @@ import {
   Trophy,
   GraduationCap,
   Dumbbell,
+  SquareKanban,
   Settings,
   Menu,
   LayoutGrid,
   Home,
   ChevronLeft,
-  ChevronRight,
   X,
 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -64,6 +64,7 @@ const navSections: { title: string; items: NavItemConfig[] }[] = [
       { href: "/work-orders", label: "Work Orders", icon: ClipboardList },
       { href: "/incidents", label: "Incidents", icon: AlertTriangle },
       { href: "/improvements", label: "Improvements", icon: Lightbulb },
+      { href: "/tasks", label: "Tasks Board", icon: SquareKanban },
     ],
   },
   {
@@ -98,12 +99,31 @@ const navSections: { title: string; items: NavItemConfig[] }[] = [
 ]
 
 const settingsItem: NavItemConfig = { href: "/settings", label: "Settings", icon: Settings }
+const SIDEBAR_SCROLL_STORAGE_KEY = "snp_sidebar_scroll_top"
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const navScrollRef = useRef<HTMLDivElement | null>(null)
+
+  function persistSidebarScroll() {
+    if (typeof window === "undefined" || !navScrollRef.current) return
+    localStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, String(navScrollRef.current.scrollTop))
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !navScrollRef.current) return
+    const storedScroll = localStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY)
+    if (!storedScroll) return
+
+    const parsed = Number(storedScroll)
+    if (!Number.isNaN(parsed)) {
+      navScrollRef.current.scrollTop = parsed
+    }
+  }, [])
 
   function closeMobileMenu() {
+    persistSidebarScroll()
     setIsMobileMenuOpen(false)
   }
 
@@ -160,28 +180,45 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       >
         <div className="flex h-full flex-col">
           <div className="flex h-16 items-center gap-2 border-b border-gray-200 px-3 dark:border-[#1F1F23]">
-            <Link href="/dashboard" onClick={closeMobileMenu} className="flex items-center gap-3 overflow-hidden">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black">
-                <Image src="/images/snp-logo.png" alt="SNP Logo" width={32} height={32} className="object-contain" />
-              </div>
-              <span className={cn("text-lg font-semibold text-gray-900 dark:text-white", collapsed && "lg:hidden")}>
-                SNP
-              </span>
-            </Link>
+            {collapsed ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="hidden h-8 w-8 p-0 lg:flex"
+                onClick={() => onToggle(false)}
+                aria-label="Expand sidebar"
+              >
+                <Image src="/images/snp-logo.png" alt="SNP Logo" width={32} height={32} className="rounded-md object-contain" />
+              </Button>
+            ) : (
+              <>
+                <Link href="/dashboard" onClick={closeMobileMenu} className="flex items-center gap-3 overflow-hidden">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black">
+                    <Image src="/images/snp-logo.png" alt="SNP Logo" width={32} height={32} className="object-contain" />
+                  </div>
+                  <span className="text-lg font-semibold text-gray-900 dark:text-white">SNP</span>
+                </Link>
 
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="ml-auto hidden lg:flex"
-              onClick={() => onToggle(!collapsed)}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto hidden lg:flex"
+                  onClick={() => onToggle(true)}
+                  aria-label="Collapse sidebar"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-3 py-4">
+          <div
+            ref={navScrollRef}
+            onScroll={persistSidebarScroll}
+            className="flex-1 overflow-y-auto px-3 py-4 scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          >
             <div className="space-y-6">
               {navSections.map((section) => (
                 <div key={section.title}>

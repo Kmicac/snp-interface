@@ -258,3 +258,55 @@ export interface SlaBreach {
   breachType: string
   breachedAt: string
 }
+
+// Task Types
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE'
+export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+export type TaskType =
+  | 'GENERAL'
+  | 'INCIDENT'
+  | 'WORK_ORDER'
+  | 'SPONSORSHIP'
+  | 'REFEREE'
+  | 'INVENTORY'
+
+export interface TaskChecklistItem {
+  id: string
+  text: string
+  done: boolean
+}
+
+export interface TaskComment {
+  id: string
+  authorId: string
+  authorName: string
+  authorAvatarUrl?: string
+  message: string
+  createdAt: string
+}
+
+export interface Task {
+  id: string
+  orgId: string
+  eventId?: string
+  title: string
+  description?: string
+  status: TaskStatus
+  priority: TaskPriority
+  type: TaskType
+  assigneeId?: string
+  assigneeName?: string
+  assigneeAvatarUrl?: string
+  dueDate?: string
+  commentsCount: number
+  checklistDone?: number
+  checklistTotal?: number
+  checklist?: TaskChecklistItem[]
+  comments?: TaskComment[]
+  relatedWorkOrderId?: string
+  relatedIncidentId?: string
+  relatedSponsorshipId?: string
+  relatedLabel?: string
+  createdAt: string
+  updatedAt: string
+}

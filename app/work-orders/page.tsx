@@ -23,15 +23,18 @@ import {
   Filter,
   Plus,
   Pencil,
+  ListTodo,
 } from "lucide-react"
-import { mockWorkOrders } from "@/lib/mock-data"
+import { mockStaff, mockWorkOrders } from "@/lib/mock-data"
 import type { WorkOrderStatus, SlaStatus, WorkOrder } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
+import { useTasksBoard } from "@/lib/context/tasks-board-context"
 import {
   CreateWorkOrderDialog,
   type CreateWorkOrderPayload,
 } from "@/components/work-orders/create-work-order-dialog"
+import { TaskDialog, type TaskDialogValues } from "@/components/tasks/task-dialog"
 
 const initialWorkOrders: WorkOrder[] = [
   ...mockWorkOrders,
@@ -111,12 +114,15 @@ function toDateTimeInput(value: string): string {
 }
 
 export default function WorkOrdersPage() {
-  const { events, currentEvent } = useAuth()
+  const { events, currentEvent, currentOrg } = useAuth()
   const { toast } = useToast()
+  const { createTask } = useTasksBoard()
   const canEdit = true
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null)
+  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
+  const [taskPrefill, setTaskPrefill] = useState<Partial<TaskDialogValues> | undefined>(undefined)
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(initialWorkOrders)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
@@ -200,6 +206,36 @@ export default function WorkOrdersPage() {
       title: "Work order updated",
       description: `${payload.title} was updated in local mock data.`,
     })
+  }
+
+  const handleCreateTaskFromWorkOrder = (workOrder: WorkOrder) => {
+    const contextPayload: Partial<TaskDialogValues> = {
+      title: `Follow up: ${workOrder.title}`,
+      description: workOrder.description,
+      status: "TODO",
+      priority: workOrder.status === "delayed" ? "HIGH" : "MEDIUM",
+      type: "WORK_ORDER",
+      eventId: currentEvent?.id ?? events[0]?.id ?? null,
+      relatedWorkOrderId: workOrder.id,
+      relatedLabel: `${workOrder.code} ${workOrder.title}`,
+    }
+
+    console.log("Create task from work order context", contextPayload)
+    setTaskPrefill(contextPayload)
+    setIsTaskDialogOpen(true)
+  }
+
+  const handleSubmitTask = (payload: TaskDialogValues) => {
+    createTask({
+      ...payload,
+      orgId: currentOrg?.id || "org-1",
+      eventId: payload.eventId ?? currentEvent?.id ?? null,
+    })
+    toast({
+      title: "Task created",
+      description: "Task was added to the board in local mock data.",
+    })
+    setTaskPrefill(undefined)
   }
 
   const getStatusBadge = (status: WorkOrderStatus) => {
@@ -388,10 +424,16 @@ export default function WorkOrdersPage() {
                     <td className="px-6 py-4 text-center">{getSlaIcon(workOrder.slaStatus)}</td>
                     {canEdit && (
                       <td className="px-6 py-4 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditingWorkOrder(workOrder)}>
-                          <Pencil className="mr-2 h-3.5 w-3.5" />
-                          Edit
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromWorkOrder(workOrder)}>
+                            <ListTodo className="mr-2 h-3.5 w-3.5" />
+                            Create task
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setEditingWorkOrder(workOrder)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -456,6 +498,18 @@ export default function WorkOrdersPage() {
         providerServices={providerServices}
         zones={zones}
         onCreate={handleEditWorkOrder}
+      />
+      <TaskDialog
+        open={isTaskDialogOpen}
+        onOpenChange={(open) => {
+          setIsTaskDialogOpen(open)
+          if (!open) setTaskPrefill(undefined)
+        }}
+        mode="create"
+        initialValues={taskPrefill}
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        assignees={mockStaff.map((staff) => ({ id: staff.id, name: staff.name, avatarUrl: staff.avatarUrl || staff.avatar }))}
+        onSubmit={handleSubmitTask}
       />
     </Layout>
   )

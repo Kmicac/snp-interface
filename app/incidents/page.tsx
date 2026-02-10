@@ -4,15 +4,17 @@ import { useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AlertTriangle, MapPin, Clock, Plus } from "lucide-react"
-import { mockIncidents } from "@/lib/mock-data"
+import { AlertTriangle, MapPin, Clock, Plus, ListTodo } from "lucide-react"
+import { mockIncidents, mockStaff } from "@/lib/mock-data"
 import type { IncidentSeverity, IncidentStatus, Incident } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
+import { useTasksBoard } from "@/lib/context/tasks-board-context"
 import {
   ReportIncidentDialog,
   type ReportIncidentPayload,
 } from "@/components/incidents/report-incident-dialog"
+import { TaskDialog, type TaskDialogValues } from "@/components/tasks/task-dialog"
 
 type IncidentListItem = Incident & {
   reporter?: string
@@ -52,10 +54,13 @@ const severityMap: Record<ReportIncidentPayload["severity"], IncidentSeverity> =
 const zoneOptions = ["TATAMI 1", "TATAMI 2", "TATAMI 3", "WARM-UP", "BACKSTAGE", "VIP", "ENTRANCE", "MEDICAL"]
 
 export default function IncidentsPage() {
-  const { events, currentEvent, user } = useAuth()
+  const { events, currentEvent, currentOrg, user } = useAuth()
   const { toast } = useToast()
+  const { createTask } = useTasksBoard()
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
+  const [taskPrefill, setTaskPrefill] = useState<Partial<TaskDialogValues> | undefined>(undefined)
   const [incidents, setIncidents] = useState<IncidentListItem[]>(initialIncidents)
 
   const handleCreateIncident = (payload: ReportIncidentPayload) => {
@@ -79,6 +84,43 @@ export default function IncidentsPage() {
       title: "Incident reported",
       description: `${payload.title} was added to local mock data.`,
     })
+  }
+
+  const handleCreateTaskFromIncident = (incident: IncidentListItem) => {
+    const severityPriorityMap: Record<IncidentSeverity, TaskDialogValues["priority"]> = {
+      low: "LOW",
+      medium: "MEDIUM",
+      high: "HIGH",
+      critical: "CRITICAL",
+    }
+
+    const contextPayload: Partial<TaskDialogValues> = {
+      title: `Resolve: ${incident.title}`,
+      description: incident.description,
+      status: "TODO",
+      priority: severityPriorityMap[incident.severity],
+      type: "INCIDENT",
+      eventId: incident.eventId ?? currentEvent?.id ?? null,
+      relatedIncidentId: incident.id,
+      relatedLabel: incident.title,
+    }
+
+    console.log("Create task from incident context", contextPayload)
+    setTaskPrefill(contextPayload)
+    setIsTaskDialogOpen(true)
+  }
+
+  const handleSubmitTask = (payload: TaskDialogValues) => {
+    createTask({
+      ...payload,
+      orgId: currentOrg?.id || "org-1",
+      eventId: payload.eventId ?? currentEvent?.id ?? null,
+    })
+    toast({
+      title: "Task created",
+      description: "Task was added to the board in local mock data.",
+    })
+    setTaskPrefill(undefined)
   }
 
   const getSeverityBadge = (severity: IncidentSeverity) => {
@@ -147,12 +189,16 @@ export default function IncidentsPage() {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h3 className="text-lg font-semibold text-white">{incident.title}</h3>
-                  {incident.description && <p className="text-sm text-gray-400 mt-1">{incident.description}</p>}
-                </div>
-                <div className="flex items-center gap-2">
-                  {getSeverityBadge(incident.severity)}
-                  {getStatusBadge(incident.status)}
-                </div>
+                {incident.description && <p className="text-sm text-gray-400 mt-1">{incident.description}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromIncident(incident)}>
+                  <ListTodo className="mr-2 h-3.5 w-3.5" />
+                  Create task
+                </Button>
+                {getSeverityBadge(incident.severity)}
+                {getStatusBadge(incident.status)}
+              </div>
               </div>
               <div className="flex flex-wrap items-center gap-4 md:gap-6 text-sm text-gray-400">
                 <div className="flex items-center gap-2">
@@ -183,6 +229,18 @@ export default function IncidentsPage() {
         zones={zoneOptions}
         reporterName={user?.name}
         onCreate={handleCreateIncident}
+      />
+      <TaskDialog
+        open={isTaskDialogOpen}
+        onOpenChange={(open) => {
+          setIsTaskDialogOpen(open)
+          if (!open) setTaskPrefill(undefined)
+        }}
+        mode="create"
+        initialValues={taskPrefill}
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        assignees={mockStaff.map((staff) => ({ id: staff.id, name: staff.name, avatarUrl: staff.avatarUrl || staff.avatar }))}
+        onSubmit={handleSubmitTask}
       />
     </Layout>
   )

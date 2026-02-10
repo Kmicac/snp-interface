@@ -24,8 +24,8 @@ const mockUser: User = {
   id: 'user_1',
   email: 'turco@snp.local',
   name: 'Gonza Turco',
-  avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
-  avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+  avatarUrl: 'https://image2url.com/r2/default/images/1770254381877-6400e3c9-9b7b-44a0-80df-f279bf1dac78.jpeg',
+  avatar: 'https://image2url.com/r2/default/images/1770254381877-6400e3c9-9b7b-44a0-80df-f279bf1dac78.jpeg',
   memberships: [
     { orgId: 'org-1', orgName: 'Santo Negro Producciones', role: 'admin' },
     { orgId: 'org-2', orgName: 'BJJ Events Chile', role: 'member' },

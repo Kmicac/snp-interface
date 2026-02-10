@@ -4,15 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Trophy, DollarSign, Gift, Plus, Pencil } from "lucide-react"
-import { mockSponsorsByTier } from "@/lib/mock-data"
+import { Trophy, DollarSign, Gift, Plus, Pencil, ListTodo } from "lucide-react"
+import { mockSponsorsByTier, mockStaff } from "@/lib/mock-data"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
+import { useTasksBoard } from "@/lib/context/tasks-board-context"
 import {
   CreateSponsorshipDialog,
   type CreateSponsorshipPayload,
 } from "@/components/sponsors/create-sponsorship-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { TaskDialog, type TaskDialogValues } from "@/components/tasks/task-dialog"
 
 type SponsorshipTier = "TITLE" | "GOLD" | "SILVER" | "BRONZE" | "SUPPORT"
 
@@ -74,12 +76,15 @@ const initialBrands: BrandItem[] = Array.from(
 const tierOrder: SponsorshipTier[] = ["TITLE", "GOLD", "SILVER", "BRONZE", "SUPPORT"]
 
 export default function SponsorsPage() {
-  const { events, currentEvent } = useAuth()
+  const { events, currentEvent, currentOrg } = useAuth()
   const { toast } = useToast()
+  const { createTask } = useTasksBoard()
   const canEdit = true
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingSponsorship, setEditingSponsorship] = useState<SponsorshipItem | null>(null)
+  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
+  const [taskPrefill, setTaskPrefill] = useState<Partial<TaskDialogValues> | undefined>(undefined)
   const [brands, setBrands] = useState<BrandItem[]>(initialBrands)
   const [sponsorships, setSponsorships] = useState<SponsorshipItem[]>(initialSponsorships)
   const previewUrlsRef = useRef<string[]>([])
@@ -175,6 +180,35 @@ export default function SponsorsPage() {
       title: "Sponsorship updated",
       description: `${selectedBrand?.name ?? "Sponsorship"} was updated in local mock data.`,
     })
+  }
+
+  const handleCreateTaskFromSponsorship = (sponsorship: SponsorshipItem) => {
+    const contextPayload: Partial<TaskDialogValues> = {
+      title: `Sponsorship follow-up: ${sponsorship.brandName}`,
+      status: "TODO",
+      priority: sponsorship.status === "CANCELED" ? "HIGH" : "MEDIUM",
+      type: "SPONSORSHIP",
+      eventId: sponsorship.eventId ?? currentEvent?.id ?? null,
+      relatedSponsorshipId: sponsorship.id,
+      relatedLabel: `${sponsorship.brandName} - ${sponsorship.tier}`,
+    }
+
+    console.log("Create task from sponsorship context", contextPayload)
+    setTaskPrefill(contextPayload)
+    setIsTaskDialogOpen(true)
+  }
+
+  const handleSubmitTask = (payload: TaskDialogValues) => {
+    createTask({
+      ...payload,
+      orgId: currentOrg?.id || "org-1",
+      eventId: payload.eventId ?? currentEvent?.id ?? null,
+    })
+    toast({
+      title: "Task created",
+      description: "Task was added to the board in local mock data.",
+    })
+    setTaskPrefill(undefined)
   }
 
   const getTierColor = (tier: SponsorshipTier) => {
@@ -280,10 +314,16 @@ export default function SponsorsPage() {
                       >
                         {canEdit && (
                           <div className="mb-2 flex justify-end">
-                            <Button variant="ghost" size="sm" onClick={() => setEditingSponsorship(sponsorship)}>
-                              <Pencil className="mr-2 h-3.5 w-3.5" />
-                              Edit
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromSponsorship(sponsorship)}>
+                                <ListTodo className="mr-2 h-3.5 w-3.5" />
+                                Create task
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setEditingSponsorship(sponsorship)}>
+                                <Pencil className="mr-2 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                            </div>
                           </div>
                         )}
                         <div className="flex items-center gap-3">
@@ -355,6 +395,18 @@ export default function SponsorsPage() {
         brands={brands}
         selectedEventId={currentEvent?.id}
         onCreate={handleEditSponsorship}
+      />
+      <TaskDialog
+        open={isTaskDialogOpen}
+        onOpenChange={(open) => {
+          setIsTaskDialogOpen(open)
+          if (!open) setTaskPrefill(undefined)
+        }}
+        mode="create"
+        initialValues={taskPrefill}
+        events={events.map((event) => ({ id: event.id, name: event.name }))}
+        assignees={mockStaff.map((staff) => ({ id: staff.id, name: staff.name, avatarUrl: staff.avatarUrl || staff.avatar }))}
+        onSubmit={handleSubmitTask}
       />
     </Layout>
   )

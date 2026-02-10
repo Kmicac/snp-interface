@@ -10,13 +10,28 @@ interface LayoutProps {
   children: ReactNode
 }
 
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "snp_sidebar_collapsed"
+
 export default function Layout({ children }: LayoutProps) {
   const [mounted, setMounted] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedValue = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
+      if (storedValue !== null) {
+        setSidebarCollapsed(storedValue === "1")
+      }
+    }
     setMounted(true)
   }, [])
+
+  const handleToggleSidebar = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed)
+    if (typeof window !== "undefined") {
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0")
+    }
+  }
 
   if (!mounted) {
     return (
@@ -32,7 +47,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-white dark:bg-[#0F0F12]">
-      <Sidebar collapsed={sidebarCollapsed} onToggle={setSidebarCollapsed} />
+      <Sidebar collapsed={sidebarCollapsed} onToggle={handleToggleSidebar} />
 
       <div
         className={cn(
