@@ -11,7 +11,6 @@ import {
   Clock,
   QrCode,
   Package,
-  FolderTree,
   Handshake,
   Trophy,
   GraduationCap,
@@ -22,6 +21,7 @@ import {
   LayoutGrid,
   Home,
   ChevronLeft,
+  ChevronDown,
   X,
 } from "lucide-react"
 import Link from "next/link"
@@ -78,8 +78,8 @@ const navSections: { title: string; items: NavItemConfig[] }[] = [
   {
     title: "Inventory",
     items: [
+      { href: "/inventory", label: "Panel", icon: LayoutGrid },
       { href: "/inventory/assets", label: "Assets", icon: Package },
-      { href: "/inventory/categories", label: "Asset Categories", icon: FolderTree },
     ],
   },
   {
@@ -105,6 +105,11 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const navScrollRef = useRef<HTMLDivElement | null>(null)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+
+  function isPathInSection(section: { items: NavItemConfig[] }): boolean {
+    return section.items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+  }
 
   function persistSidebarScroll() {
     if (typeof window === "undefined" || !navScrollRef.current) return
@@ -122,9 +127,28 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     }
   }, [])
 
+  useEffect(() => {
+    setOpenSections((prev) => {
+      const base = Object.fromEntries(
+        navSections.map((section) => [
+          section.title,
+          prev[section.title] ?? (section.title === "Overview" || isPathInSection(section)),
+        ])
+      )
+      return base
+    })
+  }, [pathname])
+
   function closeMobileMenu() {
     persistSidebarScroll()
     setIsMobileMenuOpen(false)
+  }
+
+  function toggleSection(title: string) {
+    setOpenSections((prev) => ({
+      ...prev,
+      [title]: !prev[title],
+    }))
   }
 
   function NavItem({ href, label, icon: Icon }: NavItemConfig) {
@@ -222,20 +246,39 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <div className="space-y-6">
               {navSections.map((section) => (
                 <div key={section.title}>
-                  <div
-                    className={cn(
-                      "mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400",
-                      collapsed && "lg:sr-only"
-                    )}
-                  >
-                    {section.title}
+                  {collapsed ? (
+                    <div
+                      className={cn(
+                        "mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400",
+                        "lg:sr-only"
+                      )}
+                    >
+                      {section.title}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mb-2 flex w-full items-center justify-between px-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:text-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
+                      onClick={() => toggleSection(section.title)}
+                      aria-expanded={openSections[section.title] ?? false}
+                    >
+                      <span>{section.title}</span>
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform duration-200",
+                          openSections[section.title] ? "rotate-0" : "-rotate-90"
+                        )}
+                      />
+                    </button>
+                  )}
+                  {(collapsed || openSections[section.title]) && (
+                    <div className="space-y-1">
+                      {section.items.map((item) => (
+                        <NavItem key={item.href} {...item} />
+                      ))}
+                    </div>
+                  )}
                   </div>
-                  <div className="space-y-1">
-                    {section.items.map((item) => (
-                      <NavItem key={item.href} {...item} />
-                    ))}
-                  </div>
-                </div>
               ))}
             </div>
           </div>

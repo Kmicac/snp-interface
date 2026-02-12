@@ -15,6 +15,7 @@ import {
 } from "@/components/sponsors/create-sponsorship-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { TaskDialog, type TaskDialogValues } from "@/components/tasks/task-dialog"
+import { cn } from "@/lib/utils"
 
 type SponsorshipTier = "TITLE" | "GOLD" | "SILVER" | "BRONZE" | "SUPPORT"
 
@@ -233,6 +234,28 @@ export default function SponsorsPage() {
     return colors[tier]
   }
 
+  const getTierPanelClass = (tier: SponsorshipTier) => {
+    const styles: Record<SponsorshipTier, string> = {
+      TITLE: "border-yellow-500/30 bg-gradient-to-b from-yellow-500/10 to-transparent",
+      GOLD: "border-yellow-500/20 bg-yellow-500/5",
+      SILVER: "border-slate-400/20 bg-slate-400/5",
+      BRONZE: "border-orange-600/20 bg-orange-700/5",
+      SUPPORT: "border-blue-500/20 bg-blue-500/5",
+    }
+    return styles[tier]
+  }
+
+  const getTierGridClass = (tier: SponsorshipTier) => {
+    const styles: Record<SponsorshipTier, string> = {
+      TITLE: "grid-cols-1 lg:grid-cols-2",
+      GOLD: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+      SILVER: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+      BRONZE: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+      SUPPORT: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+    }
+    return styles[tier]
+  }
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -289,9 +312,11 @@ export default function SponsorsPage() {
           </div>
         </div>
 
-        <div className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23]">
-          <h2 className="text-lg font-bold text-white mb-6">Sponsor Wall</h2>
-          <div className="space-y-8">
+        <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-6">
+          <div className="mb-6">
+            <h2 className="text-lg font-bold text-white">Sponsor Wall</h2>
+          </div>
+          <div className="space-y-5">
             {tierOrder.map((tier) => {
               const tierSponsors = sponsorshipsByTier[tier]
 
@@ -300,62 +325,76 @@ export default function SponsorsPage() {
               }
 
               return (
-                <div key={tier}>
-                  <div className="flex items-center gap-3 mb-4">
+                <section key={tier} className={cn("rounded-xl border p-4 md:p-5", getTierPanelClass(tier))}>
+                  <div className="mb-4 flex items-center gap-3">
                     <div className={`w-3 h-3 rounded-full ${getTierColor(tier)}`} />
-                    <h3 className="text-white font-medium">{tier}</h3>
+                    <h3 className="text-white font-semibold tracking-wide">{tier}</h3>
                     <Badge className={getTierBadgeColor(tier)}>{tierSponsors.length}</Badge>
                   </div>
-                  <div className="flex flex-wrap gap-4">
+                  <div className={cn("grid gap-3", getTierGridClass(tier))}>
                     {tierSponsors.map((sponsorship) => (
                       <div
                         key={sponsorship.id}
-                        className="bg-[#1A1A1F] rounded-lg p-4 border border-[#2B2B30] hover:border-[#3B3B40] transition-colors min-w-[220px]"
+                        className="group rounded-lg border border-[#2B2B30] bg-[#151821] p-4 transition-colors hover:border-[#3B3B40]"
                       >
-                        {canEdit && (
-                          <div className="mb-2 flex justify-end">
-                            <div className="flex gap-2">
-                              <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromSponsorship(sponsorship)}>
-                                <ListTodo className="mr-2 h-3.5 w-3.5" />
-                                Create task
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setEditingSponsorship(sponsorship)}>
-                                <Pencil className="mr-2 h-3.5 w-3.5" />
-                                Edit
-                              </Button>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Avatar className="h-11 w-11 rounded-md bg-[#10131B]">
+                              <AvatarImage
+                                src={brands.find((brand) => brand.id === sponsorship.brandId)?.logoUrl}
+                                alt={sponsorship.brandName}
+                              />
+                              <AvatarFallback>{sponsorship.brandName.charAt(0)}</AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-white">{sponsorship.brandName}</p>
+                              <p className="text-xs text-gray-500">{sponsorship.status}</p>
                             </div>
                           </div>
-                        )}
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 rounded-none bg-transparent">
-                            <AvatarImage
-                              src={brands.find((brand) => brand.id === sponsorship.brandId)?.logoUrl}
-                              alt={sponsorship.brandName}
-                            />
-                            <AvatarFallback>{sponsorship.brandName.charAt(0)}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="text-sm font-medium text-white">{sponsorship.brandName}</p>
-                            <p className="text-xs text-gray-500">{sponsorship.status}</p>
-                          </div>
+                          {canEdit ? (
+                            <div className="flex items-center gap-1 opacity-75 transition-opacity group-hover:opacity-100">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleCreateTaskFromSponsorship(sponsorship)}
+                                title="Create task"
+                              >
+                                <ListTodo className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => setEditingSponsorship(sponsorship)}
+                                title="Edit"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
+
                         {sponsorship.imageUrl && (
                           <img
                             src={sponsorship.imageUrl}
                             alt={`${sponsorship.brandName} event banner`}
-                            className="mt-3 h-12 w-full rounded-md object-cover"
+                            className="mt-3 h-14 w-full rounded-md border border-[#232834] object-cover"
                           />
                         )}
-                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
-                          {typeof sponsorship.cashValue === "number" && <span>Cash: ${sponsorship.cashValue.toLocaleString()}</span>}
+
+                        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                          {typeof sponsorship.cashValue === "number" && (
+                            <span className="rounded bg-[#0F121A] px-2 py-1">Cash: ${sponsorship.cashValue.toLocaleString()}</span>
+                          )}
                           {typeof sponsorship.inKindValue === "number" && (
-                            <span>In-kind: ${sponsorship.inKindValue.toLocaleString()}</span>
+                            <span className="rounded bg-[#0F121A] px-2 py-1">In-kind: ${sponsorship.inKindValue.toLocaleString()}</span>
                           )}
                         </div>
                       </div>
                     ))}
                   </div>
-                </div>
+                </section>
               )
             })}
           </div>

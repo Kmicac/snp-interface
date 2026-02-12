@@ -1,313 +1,604 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import Layout from "@/components/kokonutui/layout"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Package, Plus, QrCode, Search, SquarePen, Trash2 } from "lucide-react"
+
+import { AssetFormDialog } from "@/components/inventory/asset-form-dialog"
+import { AssetQrDialog } from "@/components/inventory/asset-qr-dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Package, Search, MapPin, Plus, Pencil } from "lucide-react"
-import { mockAssets } from "@/lib/mock-data"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
-import {
-  CreateAssetDialog,
-  type CreateAssetPayload,
-  type AssetStatusFormValue,
-  type AssetConditionFormValue,
-} from "@/components/inventory/create-asset-dialog"
+import { uploadImage } from "@/lib/api/upload-image"
+import { useAuth } from "@/lib/context/auth-context"
+import { canAccessInventory, canWriteInventory } from "@/lib/inventory/permissions"
+import type { Asset, AssetCategory, AssetQrResponse, CreateAssetDto, UpdateAssetDto } from "@/lib/inventory/types"
+import { assetStatusClassName, assetStatusLabel, createAsset, deleteAsset, getAssetQr, listAssetCategories, listAssets, updateAsset } from "@/lib/inventory/utils"
 
-interface AssetListItem {
-  id: string
-  name: string
-  category: string
-  status: AssetStatusFormValue
-  condition: AssetConditionFormValue
-  quantity: number
-  location: string
-  assetTag?: string
-  serialNumber?: string
-  notes?: string
-}
+const ASSET_IMAGE_PLACEHOLDER =
+  "https://images.unsplash.com/photo-1586864387967-d02ef85d93e8?auto=format&fit=crop&w=300&q=80"
 
-const statusFromMock: Record<string, AssetStatusFormValue> = {
-  in_storage: "IN_STORAGE",
-  in_use: "IN_USE",
-  damaged: "DAMAGED",
-  under_repair: "UNDER_REPAIR",
-  disposed: "RETIRED",
-}
+const MOCK_ASSET_CATEGORIES: AssetCategory[] = [
+  { id: "cat-competition", name: "Competition Equipment" },
+  { id: "cat-electronics", name: "Electronics" },
+  { id: "cat-medical", name: "Medical" },
+  { id: "cat-security", name: "Security" },
+  { id: "cat-broadcast", name: "Broadcast" },
+]
 
-const conditionFromMock: Record<string, AssetConditionFormValue> = {
-  new: "NEW",
-  good: "GOOD",
-  fair: "FAIR",
-  poor: "POOR",
-}
+const mockCategoryById = new Map(MOCK_ASSET_CATEGORIES.map((item) => [item.id, item]))
 
-const initialAssets: AssetListItem[] = mockAssets.map((asset) => ({
-  id: asset.id,
-  name: asset.name,
-  category: asset.category,
-  status: statusFromMock[asset.status],
-  condition: conditionFromMock[asset.condition],
-  quantity: asset.quantity,
-  location: asset.location,
-}))
+const MOCK_ASSETS: Asset[] = [
+  {
+    id: "mock-as-1",
+    name: "Tatami Mat Set Pro",
+    categoryId: "cat-competition",
+    assetTag: "TTM-001",
+    serialNumber: "SN-TTM-001",
+    quantity: 12,
+    status: "IN_STORAGE",
+    condition: "GOOD",
+    location: "Bodega A1",
+    imageUrl: "https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "mock-as-2",
+    name: "LED Scoreboard 55\"",
+    categoryId: "cat-electronics",
+    assetTag: "SCR-208",
+    serialNumber: "SN-SCR-208",
+    quantity: 2,
+    status: "IN_USE",
+    condition: "GOOD",
+    location: "Main Arena",
+    imageUrl: "https://images.unsplash.com/photo-1593642702821-c8da6771f0c6?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "mock-as-3",
+    name: "First Aid Backpack",
+    categoryId: "cat-medical",
+    assetTag: "MED-014",
+    serialNumber: "SN-MED-014",
+    quantity: 6,
+    status: "IN_STORAGE",
+    condition: "NEW",
+    location: "Medical Station",
+    imageUrl: "https://images.unsplash.com/photo-1584362917165-526a968579e8?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "mock-as-4",
+    name: "Security Barrier Fence",
+    categoryId: "cat-security",
+    assetTag: "SEC-030",
+    serialNumber: "SN-SEC-030",
+    quantity: 14,
+    status: "UNDER_REPAIR",
+    condition: "FAIR",
+    location: "Maintenance",
+    imageUrl: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "mock-as-5",
+    name: "Wireless Mic Kit",
+    categoryId: "cat-broadcast",
+    assetTag: "AUD-777",
+    serialNumber: "SN-AUD-777",
+    quantity: 4,
+    status: "DAMAGED",
+    condition: "POOR",
+    location: "Audio Cabin",
+    imageUrl: "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "mock-as-6",
+    name: "Camera Tripod Pro",
+    categoryId: "cat-broadcast",
+    assetTag: "CAM-112",
+    serialNumber: "SN-CAM-112",
+    quantity: 5,
+    status: "IN_STORAGE",
+    condition: "GOOD",
+    location: "Bodega B2",
+    imageUrl: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=300&q=80",
+  },
+].map(
+  (asset): Asset => ({
+    ...asset,
+    status: asset.status as Asset["status"],
+    condition: asset.condition as Asset["condition"],
+    category: asset.categoryId ? mockCategoryById.get(asset.categoryId) || null : null,
+  })
+)
 
-export default function AssetsPage() {
+export default function InventoryAssetsPage() {
+  const { user, currentOrg } = useAuth()
   const { toast } = useToast()
-  const canEdit = true
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingAsset, setEditingAsset] = useState<AssetListItem | null>(null)
-  const [assets, setAssets] = useState<AssetListItem[]>(initialAssets)
+
+  const [assets, setAssets] = useState<Asset[]>([])
+  const [categories, setCategories] = useState<AssetCategory[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [usingMockData, setUsingMockData] = useState(false)
+
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
 
-  const categories = useMemo(() => [...new Set(assets.map((asset) => asset.category))], [assets])
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
+  const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
 
-  const filteredAssets = useMemo(
-    () =>
-      assets.filter((asset) => {
-        const matchesStatus = statusFilter === "all" || asset.status === statusFilter
-        const matchesSearch =
-          searchQuery === "" ||
-          asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          asset.category.toLowerCase().includes(searchQuery.toLowerCase())
+  const [qrAsset, setQrAsset] = useState<Asset | null>(null)
+  const [qrData, setQrData] = useState<AssetQrResponse | null>(null)
+  const [qrError, setQrError] = useState<string | null>(null)
+  const [isQrLoading, setIsQrLoading] = useState(false)
+  const hasShownMockToastRef = useRef(false)
 
-        return matchesStatus && matchesSearch
-      }),
-    [assets, statusFilter, searchQuery]
-  )
+  const hasAccess = canAccessInventory(user, currentOrg?.id)
+  const canWrite = canWriteInventory(user, currentOrg?.id)
 
-  const handleCreateAsset = (payload: CreateAssetPayload) => {
-    console.log("Create Asset payload", payload)
+  const applyMockAssetsPreview = useCallback(() => {
+    setCategories(MOCK_ASSET_CATEGORIES)
+    setAssets(MOCK_ASSETS)
+    setUsingMockData(true)
+  }, [])
 
-    const nextAsset: AssetListItem = {
-      id: `as-${Date.now()}`,
-      name: payload.name,
-      category: payload.category,
-      status: payload.status,
-      condition: payload.condition,
-      quantity: payload.quantity,
-      location: payload.location,
-      assetTag: payload.assetTag,
-      serialNumber: payload.serialNumber,
-      notes: payload.notes,
+  const loadCategories = useCallback(async () => {
+    if (!currentOrg?.id) return
+
+    try {
+      const response = await listAssetCategories(currentOrg.id)
+      setCategories(response.length > 0 ? response : MOCK_ASSET_CATEGORIES)
+    } catch {
+      setCategories(MOCK_ASSET_CATEGORIES)
+    }
+  }, [currentOrg?.id])
+
+  const loadAssets = useCallback(async () => {
+    if (!currentOrg?.id || !hasAccess) {
+      setIsLoading(false)
+      return
     }
 
-    setAssets((prev) => [nextAsset, ...prev])
+    setIsLoading(true)
 
-    toast({
-      title: "Asset added",
-      description: `${payload.name} was added to local mock data.`,
+    try {
+      const response = await listAssets(currentOrg.id, {
+        categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
+        status: statusFilter !== "all" ? (statusFilter as Asset["status"]) : undefined,
+      })
+
+      if (response.length > 0) {
+        setAssets(response)
+        setUsingMockData(false)
+        hasShownMockToastRef.current = false
+      } else {
+        applyMockAssetsPreview()
+        if (!hasShownMockToastRef.current) {
+          toast({
+            title: "Vista demo de assets",
+            description: "Mostrando datos mock mientras se integra el backend.",
+          })
+          hasShownMockToastRef.current = true
+        }
+      }
+    } catch {
+      applyMockAssetsPreview()
+      if (!hasShownMockToastRef.current) {
+        toast({
+          title: "Vista demo de assets",
+          description: "Mostrando datos mock mientras se integra el backend.",
+        })
+        hasShownMockToastRef.current = true
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [applyMockAssetsPreview, categoryFilter, currentOrg?.id, hasAccess, statusFilter, toast])
+
+  useEffect(() => {
+    void loadCategories()
+  }, [loadCategories])
+
+  useEffect(() => {
+    void loadAssets()
+  }, [loadAssets])
+
+  const filteredAssets = useMemo(() => {
+    const byCategory =
+      categoryFilter === "all"
+        ? assets
+        : assets.filter((asset) => {
+            return (asset.categoryId || "") === categoryFilter
+          })
+
+    const byStatus =
+      statusFilter === "all"
+        ? byCategory
+        : byCategory.filter((asset) => {
+            return asset.status === statusFilter
+          })
+
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return byStatus
+
+    return byStatus.filter((asset) => {
+      const source = [asset.name, asset.assetTag, asset.serialNumber].filter(Boolean).join(" ").toLowerCase()
+      return source.includes(query)
     })
-  }
+  }, [assets, categoryFilter, searchQuery, statusFilter])
 
-  const handleEditAsset = (payload: CreateAssetPayload) => {
-    if (!editingAsset) return
+  const categoryById = useMemo(() => new Map(categories.map((item) => [item.id, item])), [categories])
+  const totalQuantity = useMemo(() => filteredAssets.reduce((acc, item) => acc + (Number.isFinite(item.quantity) ? item.quantity : 0), 0), [filteredAssets])
 
-    console.log("Edit Asset payload", payload)
+  const handleSaveAsset = async (payload: CreateAssetDto | UpdateAssetDto, imageFile: File | null, assetId?: string): Promise<boolean> => {
+    if (!currentOrg?.id) return false
 
-    setAssets((prev) =>
-      prev.map((asset) =>
-        asset.id === editingAsset.id
-          ? {
-              ...asset,
-              category: payload.category,
-              name: payload.name,
-              assetTag: payload.assetTag,
-              serialNumber: payload.serialNumber,
-              quantity: payload.quantity,
-              status: payload.status,
-              condition: payload.condition,
-              location: payload.location,
-              notes: payload.notes,
-            }
-          : asset
-      )
-    )
+    setIsSaving(true)
+    try {
+      let imageUrl = payload.imageUrl
+      let imageKey = payload.imageKey
 
-    setEditingAsset(null)
-    toast({
-      title: "Asset updated",
-      description: `${payload.name} was updated in local mock data.`,
-    })
-  }
+      if (imageFile) {
+        try {
+          const upload = await uploadImage({
+            file: imageFile,
+            folder: "assets",
+            entityId: assetId,
+          })
+          imageUrl = upload.url
+          imageKey = upload.key
+        } catch (err) {
+          toast({
+            title: "No se pudo subir la imagen",
+            description: err instanceof Error ? err.message : "El asset se guardara sin imagen.",
+            variant: "destructive",
+          })
+        }
+      }
 
-  const getStatusBadge = (status: AssetStatusFormValue) => {
-    const config: Record<AssetStatusFormValue, string> = {
-      IN_STORAGE: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-      IN_USE: "bg-green-500/20 text-green-400 border-green-500/30",
-      DAMAGED: "bg-red-500/20 text-red-400 border-red-500/30",
-      UNDER_REPAIR: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-      LOST: "bg-red-700/20 text-red-300 border-red-700/30",
-      RETIRED: "bg-gray-700/20 text-gray-500 border-gray-700/30",
+      if (assetId) {
+        await updateAsset(currentOrg.id, assetId, {
+          ...payload,
+          imageUrl,
+          imageKey,
+        })
+        toast({ title: "Asset actualizado", description: "Los cambios se guardaron correctamente." })
+      } else {
+        const normalizedName = payload.name?.trim()
+        if (!normalizedName) {
+          throw new Error("El nombre del asset es obligatorio.")
+        }
+
+        await createAsset(currentOrg.id, {
+          ...payload,
+          name: normalizedName,
+          quantity: payload.quantity ?? 1,
+          status: payload.status ?? "IN_STORAGE",
+          condition: payload.condition ?? "GOOD",
+          imageUrl,
+          imageKey,
+        } as CreateAssetDto)
+        toast({ title: "Asset creado", description: "El asset fue agregado a inventario." })
+      }
+
+      await loadAssets()
+      return true
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "No fue posible guardar el asset.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsSaving(false)
     }
-    return <Badge className={config[status]}>{status.replaceAll("_", " ")}</Badge>
   }
 
-  const getConditionBadge = (condition: AssetConditionFormValue) => {
-    const config: Record<AssetConditionFormValue, string> = {
-      NEW: "bg-green-500/20 text-green-400 border-green-500/30",
-      GOOD: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-      FAIR: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-      POOR: "bg-red-500/20 text-red-400 border-red-500/30",
-      BROKEN: "bg-red-700/20 text-red-300 border-red-700/30",
+  const handleDeleteAsset = async () => {
+    if (!currentOrg?.id || !deletingAsset) return
+
+    setIsSaving(true)
+    try {
+      await deleteAsset(currentOrg.id, deletingAsset.id)
+      toast({ title: "Asset eliminado", description: "El asset fue eliminado correctamente." })
+      setDeletingAsset(null)
+      await loadAssets()
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "No fue posible eliminar el asset.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
     }
-    return <Badge className={config[condition]}>{condition}</Badge>
+  }
+
+  const openQr = async (asset: Asset) => {
+    if (!currentOrg?.id) return
+
+    setQrAsset(asset)
+    setQrData(null)
+    setQrError(null)
+    setIsQrLoading(true)
+
+    try {
+      const response = await getAssetQr(currentOrg.id, asset.id)
+      setQrData(response)
+    } catch {
+      setQrData({
+        assetId: asset.id,
+        qrData: `ASSET:${asset.id}`,
+      })
+      setQrError(null)
+    } finally {
+      setIsQrLoading(false)
+    }
+  }
+
+  if (!currentOrg) {
+    return <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">Selecciona una organizacion para ver assets.</div>
+  }
+
+  if (!hasAccess) {
+    return <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-200">No tienes permisos para inventario.</div>
   }
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <Package className="w-6 h-6" />
-              Assets
-            </h1>
-            <p className="text-gray-500 mt-1">Manage inventory assets</p>
-          </div>
-          <Button onClick={() => setIsDialogOpen(true)} disabled={categories.length === 0}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Asset
-          </Button>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+            <Package className="h-6 w-6" />
+            Inventario (Assets)
+          </h1>
+          <p className="mt-1 text-sm text-gray-400">
+            {filteredAssets.length} assets listados - {totalQuantity} unidades totales
+            {usingMockData ? " · Vista demo" : ""}
+          </p>
         </div>
+        <Button onClick={() => setIsCreateOpen(true)} disabled={!canWrite}>
+          <Plus className="mr-2 h-4 w-4" />
+          Nuevo Asset
+        </Button>
+      </div>
 
-        <div className="bg-[#0F0F12] rounded-xl p-4 border border-[#1F1F23]">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <Input
-                placeholder="Search assets..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 bg-[#1A1A1F] border-[#2B2B30] text-white placeholder:text-gray-500"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[200px] bg-[#1A1A1F] border-[#2B2B30] text-white">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent className="bg-[#1A1A1F] border-[#2B2B30]">
-                <SelectItem value="all" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  All Statuses
-                </SelectItem>
-                <SelectItem value="IN_STORAGE" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  In Storage
-                </SelectItem>
-                <SelectItem value="IN_USE" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  In Use
-                </SelectItem>
-                <SelectItem value="DAMAGED" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  Damaged
-                </SelectItem>
-                <SelectItem value="UNDER_REPAIR" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  Under Repair
-                </SelectItem>
-                <SelectItem value="LOST" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  Lost
-                </SelectItem>
-                <SelectItem value="RETIRED" className="text-white focus:bg-[#2B2B30] focus:text-white">
-                  Retired
-                </SelectItem>
-              </SelectContent>
-            </Select>
+      <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4">
+        <div className="flex flex-col gap-3 md:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <Input
+              placeholder="Buscar por nombre, tag o serial"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="border-[#2B2B30] bg-[#1A1A1F] pl-10 text-white"
+            />
           </div>
-        </div>
 
-        <div className="bg-[#0F0F12] rounded-xl border border-[#1F1F23] overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 uppercase border-b border-[#1F1F23] bg-[#1A1A1F]">
-                  <th className="px-6 py-4 font-medium">Name</th>
-                  <th className="px-6 py-4 font-medium">Category</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium">Condition</th>
-                  <th className="px-6 py-4 font-medium">Qty</th>
-                  <th className="px-6 py-4 font-medium">Location</th>
-                  {canEdit && <th className="px-6 py-4 font-medium text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredAssets.map((asset) => (
-                  <tr key={asset.id} className="border-b border-[#1F1F23] hover:bg-[#1A1A1F] transition-colors">
-                    <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-white">{asset.name}</span>
-                      {(asset.assetTag || asset.serialNumber) && (
-                        <p className="mt-1 text-xs text-gray-500">
-                          {[asset.assetTag, asset.serialNumber].filter(Boolean).join(" • ")}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-gray-300">{asset.category}</span>
-                    </td>
-                    <td className="px-6 py-4">{getStatusBadge(asset.status)}</td>
-                    <td className="px-6 py-4">{getConditionBadge(asset.condition)}</td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-white">{asset.quantity}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-400">
-                        <MapPin className="w-3 h-3" />
-                        {asset.location}
-                      </div>
-                    </td>
-                    {canEdit && (
-                      <td className="px-6 py-4 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditingAsset(asset)}>
-                          <Pencil className="mr-2 h-3.5 w-3.5" />
-                          Edit
-                        </Button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {filteredAssets.length === 0 && <div className="text-center py-12 text-gray-500">No assets found</div>}
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-full border-[#2B2B30] bg-[#1A1A1F] text-white md:w-[220px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
+              {categories.map((category) => (
+                <SelectItem key={category.id} value={category.id}>
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-full border-[#2B2B30] bg-[#1A1A1F] text-white md:w-[190px]">
+              <SelectValue placeholder="Estado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="IN_STORAGE">IN_STORAGE</SelectItem>
+              <SelectItem value="IN_USE">IN_USE</SelectItem>
+              <SelectItem value="DAMAGED">DAMAGED</SelectItem>
+              <SelectItem value="UNDER_REPAIR">UNDER_REPAIR</SelectItem>
+              <SelectItem value="LOST">LOST</SelectItem>
+              <SelectItem value="RETIRED">RETIRED</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
-      <CreateAssetDialog
-        open={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
+      <div className="overflow-hidden rounded-xl border border-[#1F1F23] bg-[#0F0F12]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1200px] text-sm">
+            <thead>
+              <tr className="border-b border-[#1F1F23] bg-[#171A22] text-left text-xs uppercase text-gray-500">
+                <th className="px-4 py-3 font-medium">Imagen</th>
+                <th className="px-4 py-3 font-medium">Codigo / Tag</th>
+                <th className="px-4 py-3 font-medium">Nombre</th>
+                <th className="px-4 py-3 font-medium">Categoria</th>
+                <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 font-medium">Cantidad</th>
+                <th className="px-4 py-3 font-medium">Ubicacion</th>
+                <th className="px-4 py-3 font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading
+                ? Array.from({ length: 6 }).map((_, index) => (
+                    <tr key={`asset-skeleton-${index}`} className="border-b border-[#1F1F23]">
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-10 w-10 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-24 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-40 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-24 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-20 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-12 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="h-4 w-32 bg-[#20242E]" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Skeleton className="ml-auto h-8 w-48 bg-[#20242E]" />
+                      </td>
+                    </tr>
+                  ))
+                : filteredAssets.map((asset) => {
+                    const categoryName = asset.category?.name || (asset.categoryId ? categoryById.get(asset.categoryId)?.name : null) || "-"
+
+                    return (
+                      <tr key={asset.id} className="border-b border-[#1F1F23] text-gray-300 transition-colors hover:bg-[#171A22]">
+                        <td className="px-4 py-3">
+                          <img
+                            src={asset.imageUrl || ASSET_IMAGE_PLACEHOLDER}
+                            alt={asset.name}
+                            className="h-10 w-10 rounded-md border border-[#2B2B30] object-cover"
+                            onError={(event) => {
+                              if (event.currentTarget.src !== ASSET_IMAGE_PLACEHOLDER) {
+                                event.currentTarget.src = ASSET_IMAGE_PLACEHOLDER
+                              }
+                            }}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-gray-200">{asset.assetTag || asset.serialNumber || "-"}</td>
+                        <td className="px-4 py-3 font-medium text-white">{asset.name}</td>
+                        <td className="px-4 py-3">{categoryName}</td>
+                        <td className="px-4 py-3">
+                          <Badge className={assetStatusClassName(asset.status)}>{assetStatusLabel(asset.status)}</Badge>
+                        </td>
+                        <td className="px-4 py-3">{asset.quantity}</td>
+                        <td className="px-4 py-3">{asset.location || "-"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => void openQr(asset)}
+                              className="h-8 w-8 border-[#2B2B30] bg-transparent"
+                              title="Ver QR"
+                              aria-label="Ver QR"
+                            >
+                              <QrCode className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setEditingAsset(asset)}
+                              disabled={!canWrite}
+                              className="h-8 w-8 text-gray-200"
+                              title="Editar"
+                              aria-label="Editar"
+                            >
+                              <SquarePen className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeletingAsset(asset)}
+                              disabled={!canWrite}
+                              className="h-8 w-8 text-red-300 hover:text-red-200"
+                              title="Eliminar"
+                              aria-label="Eliminar"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+            </tbody>
+          </table>
+        </div>
+
+        {!isLoading && filteredAssets.length === 0 ? (
+          <div className="py-12 text-center text-sm text-gray-500">No hay assets para los filtros seleccionados.</div>
+        ) : null}
+      </div>
+
+      <AssetFormDialog
+        open={isCreateOpen}
+        onOpenChange={setIsCreateOpen}
         categories={categories}
-        onCreate={handleCreateAsset}
+        disabled={!canWrite}
+        isSubmitting={isSaving}
+        onSubmit={(payload, imageFile) => handleSaveAsset(payload, imageFile)}
       />
-      <CreateAssetDialog
+
+      <AssetFormDialog
         open={editingAsset !== null}
         onOpenChange={(open) => {
           if (!open) setEditingAsset(null)
         }}
         mode="edit"
-        initialValues={
-          editingAsset
-            ? {
-                category: editingAsset.category,
-                name: editingAsset.name,
-                assetTag: editingAsset.assetTag,
-                serialNumber: editingAsset.serialNumber,
-                quantity: editingAsset.quantity,
-                status: editingAsset.status,
-                condition: editingAsset.condition,
-                location: editingAsset.location,
-                notes: editingAsset.notes,
-              }
-            : undefined
-        }
+        initialValues={editingAsset}
         categories={categories}
-        onCreate={handleEditAsset}
+        disabled={!canWrite}
+        isSubmitting={isSaving}
+        onSubmit={(payload, imageFile) => {
+          if (!editingAsset) return Promise.resolve(false)
+          return handleSaveAsset(payload, imageFile, editingAsset.id)
+        }}
       />
-    </Layout>
+
+      <AssetQrDialog
+        open={qrAsset !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setQrAsset(null)
+            setQrData(null)
+            setQrError(null)
+          }
+        }}
+        assetName={qrAsset?.name}
+        assetTag={qrAsset?.assetTag || qrAsset?.serialNumber || null}
+        assetStatus={qrAsset?.status}
+        qrData={qrData}
+        isLoading={isQrLoading}
+        error={qrError}
+      />
+
+      <AlertDialog
+        open={deletingAsset !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingAsset(null)
+        }}
+      >
+        <AlertDialogContent className="border-[#1F1F23] bg-[#0F0F12] text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar asset</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-400">
+              Vas a eliminar <span className="font-medium text-white">{deletingAsset?.name}</span>. Esta accion no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-[#2B2B30] bg-transparent text-gray-200">Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-500"
+              onClick={(event) => {
+                event.preventDefault()
+                void handleDeleteAsset()
+              }}
+              disabled={isSaving}
+            >
+              {isSaving ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }

@@ -20,6 +20,17 @@ export default function SponsorsCard() {
     return colors[tier]
   }
 
+  const getTierPanelClass = (tier: SponsorTier) => {
+    const styles: Record<SponsorTier, string> = {
+      title: "border-yellow-500/30 bg-gradient-to-b from-yellow-500/12 to-transparent",
+      gold: "border-yellow-500/20 bg-yellow-500/5",
+      silver: "border-slate-400/20 bg-slate-400/5",
+      bronze: "border-orange-600/20 bg-orange-700/5",
+      support: "border-blue-500/20 bg-blue-500/5",
+    }
+    return styles[tier]
+  }
+
   const tiers: { key: SponsorTier; label: string }[] = [
     { key: "title", label: "Title" },
     { key: "gold", label: "Gold" },
@@ -48,22 +59,22 @@ export default function SponsorsCard() {
           if (sponsors.length === 0) return null
 
           return (
-            <div key={key}>
-              <div className="flex items-center gap-2 mb-2">
+            <div key={key} className={`rounded-lg border p-3 ${getTierPanelClass(key)}`}>
+              <div className="mb-2 flex items-center justify-between gap-2">
                 <Badge className={getTierColor(key)}>{label}</Badge>
-                <span className="text-xs text-gray-500">({sponsors.length})</span>
+                <span className="text-xs text-gray-400">{sponsors.length}</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {sponsors.map((sponsor) => (
                   <div
                     key={sponsor.id}
-                    className="flex items-center gap-2 rounded-full border border-[#2B2B30] bg-[#1A1A1F] px-3 py-1 text-sm text-gray-300"
+                    className="flex min-h-8 items-center gap-2 rounded-full border border-[#2B2B30] bg-[#1A1A1F] px-3 py-1 text-sm text-gray-200"
                   >
                     <Avatar className="h-5 w-5">
                       <AvatarImage src={sponsor.logo || undefined} alt={sponsor.brandName} />
                       <AvatarFallback>{sponsor.brandName.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <span>{sponsor.brandName}</span>
+                    <span className="leading-none">{sponsor.brandName}</span>
                   </div>
                 ))}
               </div>
