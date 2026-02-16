@@ -67,6 +67,7 @@ export function TaskCard({ task, onClick, dragRef, dndProps, isDragging = false,
         "hover:border-[#3C404A] hover:bg-[#1D2027]",
         "cursor-grab active:cursor-grabbing",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#4A5568]",
+        isDragging && !isDragOverlay && "opacity-0 pointer-events-none",
         isDragging && "shadow-[0_14px_28px_rgba(0,0,0,0.38)] ring-1 ring-[#4A5568]/70",
         isDragOverlay && "cursor-grabbing border-[#4A5568] shadow-[0_18px_30px_rgba(0,0,0,0.42)]"
       )}

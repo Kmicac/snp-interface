@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -51,6 +51,10 @@ export interface TaskDialogValues {
   relatedSponsorshipId?: string
   relatedLabel?: string
   dueDate?: string
+  imageUrl?: string
+  imageKey?: string
+  imageFile?: File | null
+  clearImage?: boolean
 }
 
 interface TaskDialogProps {
@@ -60,7 +64,8 @@ interface TaskDialogProps {
   initialValues?: Partial<TaskDialogValues>
   events: EventOption[]
   assignees: AssigneeOption[]
-  onSubmit: (payload: TaskDialogValues) => void
+  isSubmitting?: boolean
+  onSubmit: (payload: TaskDialogValues) => Promise<boolean | void> | boolean | void
 }
 
 const schema = z.object({
@@ -85,8 +90,14 @@ export function TaskDialog({
   initialValues,
   events,
   assignees,
+  isSubmitting = false,
   onSubmit,
 }: TaskDialogProps) {
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<string | null>(null)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const [clearCurrentImage, setClearCurrentImage] = useState(false)
+
   const defaultValues = useMemo(
     () => ({
       title: initialValues?.title ?? "",
@@ -113,14 +124,58 @@ export function TaskDialog({
   useEffect(() => {
     if (open) {
       form.reset(defaultValues)
+      setAttachmentFile(null)
+      setAttachmentPreviewUrl(null)
+      setAttachmentError(null)
+      setClearCurrentImage(false)
     }
-  }, [open])
+  }, [defaultValues, form, open])
+
+  useEffect(() => {
+    if (!attachmentFile) {
+      setAttachmentPreviewUrl(null)
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(attachmentFile)
+    setAttachmentPreviewUrl(objectUrl)
+
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [attachmentFile])
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
-  const handleSubmit = form.handleSubmit((data) => {
+  const existingImageUrl = clearCurrentImage ? null : (initialValues?.imageUrl ?? null)
+  const imagePreview = attachmentPreviewUrl ?? existingImageUrl
+
+  const handleAttachmentSelection = (file: File | null) => {
+    if (!file) {
+      setAttachmentFile(null)
+      setAttachmentError(null)
+      return
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setAttachmentError("Only image files are allowed.")
+      return
+    }
+
+    const maxSizeBytes = 5 * 1024 * 1024
+    if (file.size > maxSizeBytes) {
+      setAttachmentError("Image must be 5MB or smaller.")
+      return
+    }
+
+    setAttachmentError(null)
+    setClearCurrentImage(false)
+    setAttachmentFile(file)
+  }
+
+  const handleSubmit = form.handleSubmit(async (data) => {
+    if (attachmentError) return
+
     const selectedAssignee = assignees.find((assignee) => assignee.id === data.assigneeId)
-    onSubmit({
+    const success = await onSubmit({
       title: data.title,
       description: data.description || undefined,
       status: data.status,
@@ -135,8 +190,14 @@ export function TaskDialog({
       relatedSponsorshipId: data.relatedSponsorshipId || undefined,
       relatedLabel: data.relatedLabel || undefined,
       dueDate: data.dueDate || undefined,
+      imageUrl: clearCurrentImage ? undefined : (initialValues?.imageUrl ?? undefined),
+      imageKey: clearCurrentImage ? undefined : (initialValues?.imageKey ?? undefined),
+      imageFile: attachmentFile,
+      clearImage: clearCurrentImage,
     })
-    onOpenChange(false)
+    if (success !== false) {
+      onOpenChange(false)
+    }
   })
 
   return (
@@ -169,6 +230,50 @@ export function TaskDialog({
                 placeholder="Operational context, expected output and blockers."
                 className="min-h-[90px] bg-[#1A1A1F] border-[#2B2B30]"
               />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-gray-200">Image (optional)</label>
+              <div className="rounded-lg border border-[#2B2B30] bg-[#1A1A1F] p-3">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-2">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => handleAttachmentSelection(event.target.files?.[0] ?? null)}
+                      className="border-[#2B2B30] bg-[#171A22] text-sm file:mr-3 file:rounded file:border-0 file:bg-[#2A3040] file:px-3 file:py-1 file:text-xs file:text-gray-200"
+                    />
+                    <p className="text-xs text-gray-500">Accepted: image/* up to 5MB.</p>
+                    {attachmentError ? <p className="text-xs text-red-400">{attachmentError}</p> : null}
+                  </div>
+
+                  {imagePreview ? (
+                    <div className="space-y-2">
+                      <img
+                        src={imagePreview}
+                        alt="Task attachment preview"
+                        className="h-24 w-40 rounded-md border border-[#2B2B30] object-cover"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 border-[#2B2B30] bg-transparent text-xs"
+                        onClick={() => {
+                          if (attachmentFile) {
+                            setAttachmentFile(null)
+                            return
+                          }
+                          setClearCurrentImage(true)
+                        }}
+                        disabled={isSubmitting}
+                      >
+                        Remove image
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -324,14 +429,15 @@ export function TaskDialog({
           </p>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Task"}</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : mode === "edit" ? "Save changes" : "Create Task"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   )
 }
-

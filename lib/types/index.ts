@@ -284,6 +284,8 @@ export interface TaskComment {
   authorName: string
   authorAvatarUrl?: string
   message: string
+  kind?: 'COMMENT' | 'UPDATE'
+  imageUrl?: string
   createdAt: string
 }
 
@@ -309,6 +311,8 @@ export interface Task {
   relatedIncidentId?: string
   relatedSponsorshipId?: string
   relatedLabel?: string
+  imageUrl?: string
+  imageKey?: string
   createdAt: string
   updatedAt: string
 }

@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { formatDistanceToNow } from "date-fns"
+import { ImagePlus, X } from "lucide-react"
 
 import {
   Dialog,
@@ -18,7 +19,9 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
+import { uploadImage } from "@/lib/api/upload-image"
 import { useTasksBoard } from "@/lib/context/tasks-board-context"
 import type { Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -27,6 +30,7 @@ interface TaskDetailsDialogProps {
   task: Task | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  onEditTask?: (task: Task) => void
 }
 
 const priorityColorMap = {
@@ -52,12 +56,34 @@ function formatRelativeDate(value: string) {
   return formatDistanceToNow(date, { addSuffix: true })
 }
 
-export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialogProps) {
-  const { user } = useAuth()
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error("Could not generate image preview"))
+    }
+    reader.onerror = () => reject(new Error("Could not read image file"))
+    reader.readAsDataURL(file)
+  })
+}
+
+export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: TaskDetailsDialogProps) {
+  const { toast } = useToast()
+  const { user, currentOrg } = useAuth()
   const { addComment, toggleChecklistItem, addChecklistItem } = useTasksBoard()
+  const commentImageInputRef = useRef<HTMLInputElement | null>(null)
 
   const [newChecklistText, setNewChecklistText] = useState("")
   const [newCommentText, setNewCommentText] = useState("")
+  const [newCommentImageFile, setNewCommentImageFile] = useState<File | null>(null)
+  const [newCommentImagePreview, setNewCommentImagePreview] = useState<string | null>(null)
+  const [isCommentSubmitting, setIsCommentSubmitting] = useState(false)
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false)
+  const [commentImagePreviewUrl, setCommentImagePreviewUrl] = useState<string | null>(null)
 
   const checklist = task?.checklist ?? []
   const comments = useMemo(
@@ -75,6 +101,11 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
     if (!open) {
       setNewChecklistText("")
       setNewCommentText("")
+      setNewCommentImageFile(null)
+      setNewCommentImagePreview(null)
+      setIsCommentSubmitting(false)
+      setImagePreviewOpen(false)
+      setCommentImagePreviewUrl(null)
     }
   }, [open])
 
@@ -84,14 +115,100 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
     setNewChecklistText("")
   }
 
-  const handleAddComment = () => {
-    if (!task || !newCommentText.trim()) return
-    addComment(task.id, newCommentText, {
-      id: user?.id ?? "usr-local",
-      name: user?.name ?? "Unknown User",
-      avatarUrl: user?.avatarUrl || user?.avatar,
-    })
-    setNewCommentText("")
+  const handleAddComment = async () => {
+    if (!task) return
+
+    const trimmedComment = newCommentText.trim()
+    if (!trimmedComment && !newCommentImageFile) {
+      toast({
+        title: "Comment required",
+        description: "Write a short update or attach an image before adding a comment.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsCommentSubmitting(true)
+    try {
+      let imageUrl: string | undefined
+      if (newCommentImageFile) {
+        if (currentOrg?.id) {
+          try {
+            const upload = await uploadImage({
+              file: newCommentImageFile,
+              folder: `orgs/${currentOrg.id}/tasks/comments`,
+              entityId: task.id,
+            })
+            imageUrl = upload.url
+          } catch (error) {
+            toast({
+              title: "Attachment fallback",
+              description:
+                error instanceof Error
+                  ? `${error.message}. Using local preview while backend integration is completed.`
+                  : "Using local preview while backend integration is completed.",
+              variant: "destructive",
+            })
+          }
+        }
+
+        if (!imageUrl) {
+          imageUrl = await fileToDataUrl(newCommentImageFile)
+        }
+      }
+
+      addComment(
+        task.id,
+        trimmedComment || "Shared an image",
+        {
+          id: user?.id ?? "usr-local",
+          name: user?.name ?? "Unknown User",
+          avatarUrl: user?.avatarUrl || user?.avatar,
+        },
+        { imageUrl }
+      )
+
+      setNewCommentText("")
+      setNewCommentImageFile(null)
+      setNewCommentImagePreview(null)
+    } catch (error) {
+      toast({
+        title: "Could not add comment",
+        description: error instanceof Error ? error.message : "Try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCommentSubmitting(false)
+    }
+  }
+
+  const handleCommentImageSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please select an image file.",
+        variant: "destructive",
+      })
+      event.target.value = ""
+      return
+    }
+
+    try {
+      const preview = await fileToDataUrl(file)
+      setNewCommentImageFile(file)
+      setNewCommentImagePreview(preview)
+    } catch (error) {
+      toast({
+        title: "Could not read image",
+        description: error instanceof Error ? error.message : "Try another image.",
+        variant: "destructive",
+      })
+    } finally {
+      event.target.value = ""
+    }
   }
 
   return (
@@ -118,6 +235,24 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
                     {task.description || "No description provided for this task yet."}
                   </p>
                 </section>
+
+                {task.imageUrl ? (
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-200">Attachment</h4>
+                    <button
+                      type="button"
+                      onClick={() => setImagePreviewOpen(true)}
+                      className="w-full overflow-hidden rounded-md border border-[#2A2E3A] bg-[#171C2A] p-1 text-left transition hover:border-[#3E4658]"
+                    >
+                      <img
+                        src={task.imageUrl}
+                        alt={`${task.title} attachment`}
+                        className="h-40 w-full rounded object-cover"
+                      />
+                    </button>
+                    <p className="text-xs text-gray-500">Click image to preview.</p>
+                  </section>
+                ) : null}
 
                 <section className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -198,10 +333,28 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
                                 </AvatarFallback>
                               </Avatar>
                               <span className="text-xs font-medium text-gray-200">{comment.authorName}</span>
+                              {comment.kind === "UPDATE" ? (
+                                <Badge className="h-5 border-[#38558A]/40 bg-[#38558A]/20 px-1.5 text-[10px] text-blue-200">
+                                  UPDATE
+                                </Badge>
+                              ) : null}
                             </div>
                             <span className="text-[11px] text-gray-400">{formatRelativeDate(comment.createdAt)}</span>
                           </div>
                           <p className="text-sm text-gray-300">{comment.message}</p>
+                          {comment.imageUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setCommentImagePreviewUrl(comment.imageUrl ?? null)}
+                              className="mt-2 block w-full overflow-hidden rounded-md border border-[#2A2E3A] bg-[#111626] p-1 text-left transition hover:border-[#3E4658]"
+                            >
+                              <img
+                                src={comment.imageUrl}
+                                alt="Comment attachment"
+                                className="max-h-48 w-full rounded object-cover"
+                              />
+                            </button>
+                          ) : null}
                         </div>
                       ))
                     ) : (
@@ -213,14 +366,60 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
                 </ScrollArea>
 
                 <div className="space-y-2">
-                  <Textarea
-                    value={newCommentText}
-                    onChange={(event) => setNewCommentText(event.target.value)}
-                    placeholder="Write an update..."
-                    className="min-h-[84px] border-[#2A2E3A] bg-[#171C2A] text-sm text-gray-100 placeholder:text-gray-500"
-                  />
+                  <div className="relative">
+                    <Textarea
+                      value={newCommentText}
+                      onChange={(event) => setNewCommentText(event.target.value)}
+                      placeholder="Write an update..."
+                      className="min-h-[84px] border-[#2A2E3A] bg-[#171C2A] pr-11 text-sm text-gray-100 placeholder:text-gray-500"
+                    />
+                    <input
+                      ref={commentImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleCommentImageSelect}
+                    />
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="absolute bottom-2 right-2 h-7 w-7 text-blue-300 hover:bg-[#202638] hover:text-blue-200"
+                      onClick={() => commentImageInputRef.current?.click()}
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {newCommentImagePreview ? (
+                    <div className="flex items-center justify-between rounded-md border border-[#2A2E3A] bg-[#171C2A] px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setCommentImagePreviewUrl(newCommentImagePreview)}
+                        className="flex items-center gap-2"
+                      >
+                        <img
+                          src={newCommentImagePreview}
+                          alt="New comment attachment preview"
+                          className="h-9 w-9 rounded object-cover"
+                        />
+                        <span className="text-xs text-gray-300">Image ready to attach</span>
+                      </button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6 text-gray-400 hover:text-gray-100"
+                        onClick={() => {
+                          setNewCommentImageFile(null)
+                          setNewCommentImagePreview(null)
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="flex justify-end">
-                    <Button size="sm" onClick={handleAddComment}>
+                    <Button size="sm" onClick={handleAddComment} disabled={isCommentSubmitting}>
                       Add comment
                     </Button>
                   </div>
@@ -229,10 +428,61 @@ export function TaskDetailsDialog({ task, open, onOpenChange }: TaskDetailsDialo
             </div>
 
             <DialogFooter>
+              {onEditTask ? (
+                <Button type="button" variant="outline" onClick={() => onEditTask(task)}>
+                  Edit task
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Close
               </Button>
             </DialogFooter>
+
+            <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+              <DialogContent className="border-[#1F1F23] bg-[#0B0D12] text-white sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Task image</DialogTitle>
+                  <DialogDescription className="text-gray-400">{task.title}</DialogDescription>
+                </DialogHeader>
+                <div className="overflow-hidden rounded-lg border border-[#2A2E3A] bg-black/50 p-2">
+                  {task.imageUrl ? (
+                    <img
+                      src={task.imageUrl}
+                      alt={`${task.title} full preview`}
+                      className="max-h-[70vh] w-full rounded object-contain"
+                    />
+                  ) : null}
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setImagePreviewOpen(false)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(commentImagePreviewUrl)} onOpenChange={(nextOpen) => !nextOpen && setCommentImagePreviewUrl(null)}>
+              <DialogContent className="border-[#1F1F23] bg-[#0B0D12] text-white sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Comment image</DialogTitle>
+                  <DialogDescription className="text-gray-400">{task.title}</DialogDescription>
+                </DialogHeader>
+                <div className="overflow-hidden rounded-lg border border-[#2A2E3A] bg-black/50 p-2">
+                  {commentImagePreviewUrl ? (
+                    <img
+                      src={commentImagePreviewUrl}
+                      alt="Comment image full preview"
+                      className="max-h-[70vh] w-full rounded object-contain"
+                    />
+                  ) : null}
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setCommentImagePreviewUrl(null)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         ) : null}
       </DialogContent>

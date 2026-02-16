@@ -21,6 +21,8 @@ export interface TaskMutationInput {
   relatedWorkOrderId?: string
   relatedSponsorshipId?: string
   relatedLabel?: string
+  imageUrl?: string
+  imageKey?: string
   checklist?: TaskChecklistItem[]
   comments?: TaskComment[]
 }
@@ -37,12 +39,16 @@ interface TaskCommentAuthor {
   avatarUrl?: string
 }
 
+interface AddCommentOptions {
+  imageUrl?: string
+}
+
 interface TasksBoardContextValue {
   tasks: Task[]
   createTask: (input: TaskMutationInput) => Task
   updateTask: (taskId: string, input: Partial<TaskMutationInput>) => void
   moveTask: (taskId: string, newStatus: TaskStatus, options?: MoveTaskOptions) => void
-  addComment: (taskId: string, message: string, author: TaskCommentAuthor) => void
+  addComment: (taskId: string, message: string, author: TaskCommentAuthor, options?: AddCommentOptions) => void
   toggleChecklistItem: (taskId: string, itemId: string) => void
   addChecklistItem: (taskId: string, text: string) => void
 }
@@ -61,6 +67,26 @@ function deriveTaskCounters(task: Task): Task {
     checklistTotal,
     checklistDone,
     commentsCount,
+  }
+}
+
+function buildTaskActivityEntry(params: {
+  authorId: string
+  authorName: string
+  authorAvatarUrl?: string
+  message: string
+  kind: "COMMENT" | "UPDATE"
+  imageUrl?: string
+}): TaskComment {
+  return {
+    id: `cmt-${Date.now()}-${Math.round(Math.random() * 10000)}`,
+    authorId: params.authorId,
+    authorName: params.authorName,
+    authorAvatarUrl: params.authorAvatarUrl,
+    message: params.message,
+    kind: params.kind,
+    imageUrl: params.imageUrl,
+    createdAt: new Date().toISOString(),
   }
 }
 
@@ -113,6 +139,8 @@ export function TasksBoardProvider({ children }: { children: React.ReactNode }) 
           relatedWorkOrderId: input.relatedWorkOrderId,
           relatedSponsorshipId: input.relatedSponsorshipId,
           relatedLabel: input.relatedLabel,
+          imageUrl: input.imageUrl,
+          imageKey: input.imageKey,
           createdAt: now,
           updatedAt: now,
         }
@@ -125,16 +153,42 @@ export function TasksBoardProvider({ children }: { children: React.ReactNode }) 
       updateTask: (taskId, input) => {
         console.log("Update Task payload", { taskId, ...input })
         setTasks((prev) =>
-          prev.map((task) =>
-            task.id === taskId
-              ? deriveTaskCounters({
-                  ...task,
-                  ...input,
-                  eventId: input.eventId === null ? undefined : (input.eventId ?? task.eventId),
-                  updatedAt: new Date().toISOString(),
+          prev.map((task) => {
+            if (task.id !== taskId) return task
+
+            const updates: string[] = []
+            if (input.status && input.status !== task.status) updates.push(`Status changed to ${input.status}`)
+            if (input.priority && input.priority !== task.priority) updates.push(`Priority changed to ${input.priority}`)
+            if (input.assigneeName !== undefined && input.assigneeName !== task.assigneeName) {
+              updates.push(`Assignee changed to ${input.assigneeName || "Unassigned"}`)
+            }
+            if (input.dueDate !== undefined && input.dueDate !== task.dueDate) {
+              updates.push(input.dueDate ? "Due date updated" : "Due date removed")
+            }
+            if (input.imageUrl !== undefined && input.imageUrl !== task.imageUrl) {
+              updates.push(input.imageUrl ? "Attachment updated" : "Attachment removed")
+            }
+
+            const nextComments = [...(input.comments ?? task.comments ?? [])]
+            if (updates.length > 0) {
+              nextComments.push(
+                buildTaskActivityEntry({
+                  authorId: "system",
+                  authorName: "System",
+                  message: updates.join(" · "),
+                  kind: "UPDATE",
                 })
-              : task
-          )
+              )
+            }
+
+            return deriveTaskCounters({
+              ...task,
+              ...input,
+              comments: nextComments,
+              eventId: input.eventId === null ? undefined : (input.eventId ?? task.eventId),
+              updatedAt: new Date().toISOString(),
+            })
+          })
         )
       },
       moveTask: (taskId, newStatus, options) => {
@@ -144,9 +198,26 @@ export function TasksBoardProvider({ children }: { children: React.ReactNode }) 
           if (activeIndex === -1) return prev
 
           const activeTask = prev[activeIndex]
+          const updateMessage =
+            activeTask.status === newStatus
+              ? null
+              : `Moved from ${activeTask.status} to ${newStatus}`
+          const nextComments = [...(activeTask.comments ?? [])]
+          if (updateMessage) {
+            nextComments.push(
+              buildTaskActivityEntry({
+                authorId: "system",
+                authorName: "System",
+                message: updateMessage,
+                kind: "UPDATE",
+              })
+            )
+          }
+
           const updatedTask = deriveTaskCounters({
             ...activeTask,
             status: newStatus,
+            comments: nextComments,
             updatedAt: new Date().toISOString(),
           })
 
@@ -166,7 +237,7 @@ export function TasksBoardProvider({ children }: { children: React.ReactNode }) 
           return insertTaskAtStatusEnd(tasksWithoutActive, updatedTask, newStatus)
         })
       },
-      addComment: (taskId, message, author) => {
+      addComment: (taskId, message, author, options) => {
         const trimmedMessage = message.trim()
         if (!trimmedMessage) return
 
@@ -176,14 +247,14 @@ export function TasksBoardProvider({ children }: { children: React.ReactNode }) 
 
             const nextComments: TaskComment[] = [
               ...(task.comments ?? []),
-              {
-                id: `cmt-${Date.now()}`,
+              buildTaskActivityEntry({
                 authorId: author.id,
                 authorName: author.name,
                 authorAvatarUrl: author.avatarUrl,
                 message: trimmedMessage,
-                createdAt: new Date().toISOString(),
-              },
+                kind: "COMMENT",
+                imageUrl: options?.imageUrl,
+              }),
             ]
 
             return deriveTaskCounters({
