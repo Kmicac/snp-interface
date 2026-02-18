@@ -199,17 +199,27 @@ export default function SponsorsPage() {
     setIsTaskDialogOpen(true)
   }
 
-  const handleSubmitTask = (payload: TaskDialogValues) => {
-    createTask({
-      ...payload,
-      orgId: currentOrg?.id || "org-1",
-      eventId: payload.eventId ?? currentEvent?.id ?? null,
-    })
-    toast({
-      title: "Task created",
-      description: "Task was added to the board in local mock data.",
-    })
-    setTaskPrefill(undefined)
+  const handleSubmitTask = async (payload: TaskDialogValues) => {
+    try {
+      await createTask({
+        ...payload,
+        orgId: currentOrg?.id,
+        eventId: payload.eventId ?? currentEvent?.id ?? null,
+      })
+      toast({
+        title: "Task created",
+        description: "Task saved successfully.",
+      })
+      setTaskPrefill(undefined)
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Could not create task.",
+        variant: "destructive",
+      })
+      return false
+    }
   }
 
   const getTierColor = (tier: SponsorshipTier) => {

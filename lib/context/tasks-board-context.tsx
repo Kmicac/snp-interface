@@ -1,9 +1,12 @@
 "use client"
 
-import { createContext, useContext, useMemo, useState } from "react"
-import { mockTasks } from "@/lib/mock-data"
-import type { Task, TaskChecklistItem, TaskComment, TaskPriority, TaskStatus, TaskType } from "@/lib/types"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+
+import { tasksClient, type TaskApiResponse, type TaskChecklistApi, type TaskCommentApi } from "@/lib/api/modules/tasks-client"
 import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
+import type { Task, TaskChecklistItem, TaskComment, TaskPriority, TaskStatus, TaskType } from "@/lib/types"
 
 export interface TaskMutationInput {
   orgId?: string
@@ -13,7 +16,7 @@ export interface TaskMutationInput {
   status: TaskStatus
   priority: TaskPriority
   type: TaskType
-  assigneeId?: string
+  assigneeId?: string | null
   assigneeName?: string
   assigneeAvatarUrl?: string
   dueDate?: string
@@ -21,8 +24,8 @@ export interface TaskMutationInput {
   relatedWorkOrderId?: string
   relatedSponsorshipId?: string
   relatedLabel?: string
-  imageUrl?: string
-  imageKey?: string
+  imageUrl?: string | null
+  imageKey?: string | null
   checklist?: TaskChecklistItem[]
   comments?: TaskComment[]
 }
@@ -45,271 +48,511 @@ interface AddCommentOptions {
 
 interface TasksBoardContextValue {
   tasks: Task[]
-  createTask: (input: TaskMutationInput) => Task
-  updateTask: (taskId: string, input: Partial<TaskMutationInput>) => void
-  moveTask: (taskId: string, newStatus: TaskStatus, options?: MoveTaskOptions) => void
-  addComment: (taskId: string, message: string, author: TaskCommentAuthor, options?: AddCommentOptions) => void
-  toggleChecklistItem: (taskId: string, itemId: string) => void
-  addChecklistItem: (taskId: string, text: string) => void
+  isLoading: boolean
+  errorMessage: string | null
+  reloadTasks: () => Promise<void>
+  createTask: (input: TaskMutationInput) => Promise<Task>
+  updateTask: (taskId: string, input: Partial<TaskMutationInput>) => Promise<Task>
+  moveTask: (taskId: string, newStatus: TaskStatus, options?: MoveTaskOptions) => Promise<Task>
+  addComment: (taskId: string, message: string, author: TaskCommentAuthor, options?: AddCommentOptions) => Promise<Task>
+  toggleChecklistItem: (taskId: string, itemId: string) => Promise<Task>
+  addChecklistItem: (taskId: string, text: string) => Promise<Task>
 }
 
 const TasksBoardContext = createContext<TasksBoardContextValue | undefined>(undefined)
 
-function deriveTaskCounters(task: Task): Task {
-  const checklistTotal = task.checklist ? task.checklist.length : (task.checklistTotal ?? 0)
-  const checklistDone = task.checklist
-    ? task.checklist.filter((item) => item.done).length
-    : (task.checklistDone ?? 0)
-  const commentsCount = task.comments ? task.comments.length : task.commentsCount
-
+function mapTaskComment(source: TaskCommentApi): TaskComment {
   return {
-    ...task,
-    checklistTotal,
-    checklistDone,
-    commentsCount,
+    id: source.id,
+    authorId: source.authorId,
+    authorName: source.authorName,
+    authorAvatarUrl: source.authorAvatarUrl ?? undefined,
+    kind: source.kind ?? undefined,
+    message: source.message,
+    imageUrl: source.imageUrl ?? undefined,
+    createdAt: source.createdAt,
   }
 }
 
-function buildTaskActivityEntry(params: {
-  authorId: string
-  authorName: string
-  authorAvatarUrl?: string
-  message: string
-  kind: "COMMENT" | "UPDATE"
-  imageUrl?: string
-}): TaskComment {
+function mapTaskChecklistItem(source: TaskChecklistApi): TaskChecklistItem {
   return {
-    id: `cmt-${Date.now()}-${Math.round(Math.random() * 10000)}`,
-    authorId: params.authorId,
-    authorName: params.authorName,
-    authorAvatarUrl: params.authorAvatarUrl,
-    message: params.message,
-    kind: params.kind,
-    imageUrl: params.imageUrl,
-    createdAt: new Date().toISOString(),
+    id: source.id,
+    text: source.text,
+    done: source.done,
   }
 }
 
-function insertTaskAtStatusEnd(tasks: Task[], task: Task, status: TaskStatus): Task[] {
-  let lastStatusIndex = -1
+function mapTask(source: TaskApiResponse): Task {
+  const checklist = Array.isArray(source.checklist)
+    ? source.checklist.map(mapTaskChecklistItem)
+    : []
+  const comments = Array.isArray(source.comments)
+    ? source.comments.map(mapTaskComment)
+    : []
 
-  for (let index = 0; index < tasks.length; index += 1) {
-    if (tasks[index].status === status) {
-      lastStatusIndex = index
+  return {
+    id: source.id,
+    orgId: source.orgId ?? source.organizationId ?? "",
+    eventId: source.eventId ?? undefined,
+    title: source.title,
+    description: source.description ?? undefined,
+    status: source.status,
+    priority: source.priority,
+    type: source.type,
+    assigneeId: source.assigneeId ?? undefined,
+    assigneeName: source.assigneeName ?? undefined,
+    assigneeAvatarUrl: source.assigneeAvatarUrl ?? undefined,
+    dueDate: source.dueDate ?? undefined,
+    comments,
+    checklist,
+    commentsCount: source.commentsCount ?? comments.length,
+    checklistDone: source.checklistDone ?? checklist.filter((item) => item.done).length,
+    checklistTotal: source.checklistTotal ?? checklist.length,
+    relatedWorkOrderId: source.relatedWorkOrderId ?? undefined,
+    relatedIncidentId: source.relatedIncidentId ?? undefined,
+    relatedSponsorshipId: source.relatedSponsorshipId ?? undefined,
+    relatedLabel: source.relatedLabel ?? undefined,
+    position: source.position ?? undefined,
+    imageUrl: source.imageUrl ?? undefined,
+    imageKey: source.imageKey ?? undefined,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+  }
+}
+
+function sortTasks(items: Task[]): Task[] {
+  const statusOrder: Record<TaskStatus, number> = {
+    TODO: 0,
+    IN_PROGRESS: 1,
+    BLOCKED: 2,
+    DONE: 3,
+  }
+
+  return [...items].sort((left, right) => {
+    const laneDiff = statusOrder[left.status] - statusOrder[right.status]
+    if (laneDiff !== 0) return laneDiff
+
+    const leftPosition = typeof left.position === "number" ? left.position : Number.MAX_SAFE_INTEGER
+    const rightPosition = typeof right.position === "number" ? right.position : Number.MAX_SAFE_INTEGER
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition
+
+    return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+  })
+}
+
+function normalizeTaskList(response: unknown): Task[] {
+  if (!Array.isArray(response)) return []
+  const mapped = response
+    .filter((item): item is TaskApiResponse => Boolean(item && typeof item === "object"))
+    .map(mapTask)
+  return sortTasks(mapped)
+}
+
+function upsertTask(items: Task[], updated: Task): Task[] {
+  const index = items.findIndex((task) => task.id === updated.id)
+  if (index < 0) return sortTasks([updated, ...items])
+
+  const next = [...items]
+  next[index] = updated
+  return sortTasks(next)
+}
+
+function applyOptimisticMove(
+  items: Task[],
+  taskId: string,
+  newStatus: TaskStatus,
+  overTaskId?: string,
+): Task[] {
+  const movingTask = items.find((item) => item.id === taskId)
+  if (!movingTask) return items
+
+  const laneTasks = (status: TaskStatus) =>
+    sortTasks(items.filter((task) => task.status === status && task.id !== taskId))
+
+  const sourceStatus = movingTask.status
+  const sourceLane = laneTasks(sourceStatus)
+  const destinationLane = sourceStatus === newStatus ? sourceLane : laneTasks(newStatus)
+
+  let insertIndex = destinationLane.length
+  if (overTaskId) {
+    const overIndex = destinationLane.findIndex((task) => task.id === overTaskId)
+    if (overIndex >= 0) {
+      insertIndex = overIndex
     }
   }
 
-  if (lastStatusIndex === -1) {
-    return [...tasks, task]
+  destinationLane.splice(insertIndex, 0, {
+    ...movingTask,
+    status: newStatus,
+  })
+
+  const byId = new Map(items.map((item) => [item.id, { ...item }]))
+
+  if (sourceStatus !== newStatus) {
+    sourceLane.forEach((task, index) => {
+      const current = byId.get(task.id)
+      if (!current) return
+      byId.set(task.id, {
+        ...current,
+        position: index,
+      })
+    })
   }
 
-  const next = [...tasks]
-  next.splice(lastStatusIndex + 1, 0, task)
-  return next
+  destinationLane.forEach((task, index) => {
+    const current = byId.get(task.id)
+    if (!current) return
+    byId.set(task.id, {
+      ...current,
+      status: newStatus,
+      position: index,
+    })
+  })
+
+  return sortTasks(Array.from(byId.values()))
+}
+
+function buildStatusChangeUpdateComment(from: TaskStatus, to: TaskStatus): TaskComment {
+  const now = new Date().toISOString()
+  return {
+    id: `task-update-${Date.now()}-${Math.round(Math.random() * 10000)}`,
+    authorId: "system",
+    authorName: "System",
+    message: `Moved from ${from} to ${to}`,
+    kind: "UPDATE",
+    createdAt: now,
+  }
+}
+
+function appendStatusChangeComment(task: Task, fromStatus?: TaskStatus): Task {
+  if (!fromStatus || fromStatus === task.status) return task
+
+  const message = `Moved from ${fromStatus} to ${task.status}`
+  const currentComments = task.comments ?? []
+  const duplicate = currentComments.some((entry) => entry.kind === "UPDATE" && entry.message === message)
+  if (duplicate) {
+    return {
+      ...task,
+      commentsCount: currentComments.length,
+    }
+  }
+
+  const comments = [...currentComments, buildStatusChangeUpdateComment(fromStatus, task.status)]
+  return {
+    ...task,
+    comments,
+    commentsCount: comments.length,
+  }
+}
+
+function isLocalStatusUpdateComment(comment: TaskComment): boolean {
+  return comment.kind === "UPDATE" && comment.authorId === "system" && comment.message.startsWith("Moved from ")
+}
+
+function mergeLocalStatusUpdateComments(previousTask: Task | undefined, nextTask: Task): Task {
+  if (!previousTask?.comments?.length) return nextTask
+
+  const localUpdates = previousTask.comments.filter(isLocalStatusUpdateComment)
+  if (localUpdates.length === 0) return nextTask
+
+  const mergedComments = [...(nextTask.comments ?? [])]
+  let changed = false
+
+  for (const update of localUpdates) {
+    const duplicate = mergedComments.some((comment) =>
+      comment.kind === "UPDATE" && comment.message === update.message,
+    )
+    if (!duplicate) {
+      mergedComments.push(update)
+      changed = true
+    }
+  }
+
+  if (!changed) return nextTask
+
+  mergedComments.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+
+  return {
+    ...nextTask,
+    comments: mergedComments,
+    commentsCount: mergedComments.length,
+  }
+}
+
+function mergeReloadedTasks(previous: Task[], next: Task[]): Task[] {
+  const previousById = new Map(previous.map((task) => [task.id, task]))
+  return sortTasks(
+    next.map((task) => mergeLocalStatusUpdateComments(previousById.get(task.id), task)),
+  )
+}
+
+function invalidateTaskRelatedKeys(orgId: string, task: Task) {
+  const keys = [
+    queryKeys.tasks(orgId),
+    queryKeys.task(task.id),
+    queryKeys.taskActivity(task.id),
+    queryKeys.staffMembers(orgId),
+    queryKeys.assets(orgId),
+    queryKeys.kits(orgId),
+    queryKeys.movements(orgId),
+    queryKeys.dashboard(orgId, task.eventId ?? "all"),
+    queryKeys.checklists(orgId, task.eventId ?? "all"),
+  ] as const
+
+  const mutableKeys: Array<readonly unknown[]> = [...keys]
+
+  if (task.eventId) {
+    mutableKeys.push(queryKeys.event(orgId, task.eventId))
+    mutableKeys.push(queryKeys.eventResources(task.eventId))
+    mutableKeys.push(queryKeys.zones(task.eventId))
+    mutableKeys.push(queryKeys.workOrders(task.eventId))
+    mutableKeys.push(queryKeys.assignments(task.eventId))
+    mutableKeys.push(queryKeys.credentials(task.eventId))
+  }
+
+  if (task.relatedWorkOrderId) {
+    mutableKeys.push(queryKeys.workOrder(task.relatedWorkOrderId))
+  }
+
+  invalidateQueryKeys(...mutableKeys)
 }
 
 export function TasksBoardProvider({ children }: { children: React.ReactNode }) {
-  const { currentOrg, currentEvent } = useAuth()
-  const [tasks, setTasks] = useState<Task[]>(() => mockTasks.map((task) => deriveTaskCounters(task)))
+  const { currentOrg } = useAuth()
 
-  const value = useMemo<TasksBoardContextValue>(
-    () => ({
-      tasks,
-      createTask: (input) => {
-        const now = new Date().toISOString()
-        const nextTask: Task = {
-          id: `tsk-${Date.now()}`,
-          orgId: input.orgId || currentOrg?.id || "org-1",
-          eventId: input.eventId ?? currentEvent?.id ?? undefined,
-          title: input.title,
-          description: input.description,
-          status: input.status,
-          priority: input.priority,
-          type: input.type,
-          assigneeId: input.assigneeId,
-          assigneeName: input.assigneeName,
-          assigneeAvatarUrl: input.assigneeAvatarUrl,
-          dueDate: input.dueDate,
-          checklist: input.checklist ?? [],
-          comments: input.comments ?? [],
-          commentsCount: input.comments?.length ?? 0,
-          checklistDone: input.checklist?.filter((item) => item.done).length ?? 0,
-          checklistTotal: input.checklist?.length ?? 0,
-          relatedIncidentId: input.relatedIncidentId,
-          relatedWorkOrderId: input.relatedWorkOrderId,
-          relatedSponsorshipId: input.relatedSponsorshipId,
-          relatedLabel: input.relatedLabel,
-          imageUrl: input.imageUrl,
-          imageKey: input.imageKey,
-          createdAt: now,
-          updatedAt: now,
-        }
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const tasksRef = useRef<Task[]>([])
+  const skipNextInvalidationReloadRef = useRef(false)
 
-        const normalizedTask = deriveTaskCounters(nextTask)
-        console.log("Create Task payload", normalizedTask)
-        setTasks((prev) => [normalizedTask, ...prev])
-        return normalizedTask
-      },
-      updateTask: (taskId, input) => {
-        console.log("Update Task payload", { taskId, ...input })
-        setTasks((prev) =>
-          prev.map((task) => {
-            if (task.id !== taskId) return task
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
 
-            const updates: string[] = []
-            if (input.status && input.status !== task.status) updates.push(`Status changed to ${input.status}`)
-            if (input.priority && input.priority !== task.priority) updates.push(`Priority changed to ${input.priority}`)
-            if (input.assigneeName !== undefined && input.assigneeName !== task.assigneeName) {
-              updates.push(`Assignee changed to ${input.assigneeName || "Unassigned"}`)
-            }
-            if (input.dueDate !== undefined && input.dueDate !== task.dueDate) {
-              updates.push(input.dueDate ? "Due date updated" : "Due date removed")
-            }
-            if (input.imageUrl !== undefined && input.imageUrl !== task.imageUrl) {
-              updates.push(input.imageUrl ? "Attachment updated" : "Attachment removed")
-            }
+  const resolveOrgId = useCallback((candidate?: string) => {
+    const orgId = candidate ?? currentOrg?.id
+    if (!orgId) {
+      throw new Error("No organization selected")
+    }
+    return orgId
+  }, [currentOrg?.id])
 
-            const nextComments = [...(input.comments ?? task.comments ?? [])]
-            if (updates.length > 0) {
-              nextComments.push(
-                buildTaskActivityEntry({
-                  authorId: "system",
-                  authorName: "System",
-                  message: updates.join(" · "),
-                  kind: "UPDATE",
-                })
-              )
-            }
+  const reloadTasks = useCallback(async () => {
+    if (!currentOrg?.id) {
+      setTasks([])
+      setErrorMessage(null)
+      setIsLoading(false)
+      return
+    }
 
-            return deriveTaskCounters({
-              ...task,
-              ...input,
-              comments: nextComments,
-              eventId: input.eventId === null ? undefined : (input.eventId ?? task.eventId),
-              updatedAt: new Date().toISOString(),
-            })
-          })
-        )
-      },
-      moveTask: (taskId, newStatus, options) => {
-        console.log("Move Task payload", { taskId, newStatus, ...options })
-        setTasks((prev) => {
-          const activeIndex = prev.findIndex((task) => task.id === taskId)
-          if (activeIndex === -1) return prev
+    const isInitialLoad = tasksRef.current.length === 0
+    if (isInitialLoad) {
+      setIsLoading(true)
+    }
 
-          const activeTask = prev[activeIndex]
-          const updateMessage =
-            activeTask.status === newStatus
-              ? null
-              : `Moved from ${activeTask.status} to ${newStatus}`
-          const nextComments = [...(activeTask.comments ?? [])]
-          if (updateMessage) {
-            nextComments.push(
-              buildTaskActivityEntry({
-                authorId: "system",
-                authorName: "System",
-                message: updateMessage,
-                kind: "UPDATE",
-              })
-            )
-          }
+    setErrorMessage(null)
+    try {
+      const response = await tasksClient.list(currentOrg.id)
+      const normalized = normalizeTaskList(response)
+      setTasks((previous) => mergeReloadedTasks(previous, normalized))
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load tasks")
+      if (isInitialLoad) {
+        setTasks([])
+      }
+      throw error
+    } finally {
+      if (isInitialLoad) {
+        setIsLoading(false)
+      }
+    }
+  }, [currentOrg?.id])
 
-          const updatedTask = deriveTaskCounters({
-            ...activeTask,
-            status: newStatus,
-            comments: nextComments,
-            updatedAt: new Date().toISOString(),
-          })
+  const triggerTaskInvalidation = useCallback((orgId: string, task: Task) => {
+    skipNextInvalidationReloadRef.current = true
+    invalidateTaskRelatedKeys(orgId, task)
+  }, [])
 
-          const tasksWithoutActive = prev.filter((task) => task.id !== taskId)
-          const overTaskId = options?.overTaskId
+  useEffect(() => {
+    void reloadTasks().catch(() => {
+      // State already updated in reloadTasks.
+    })
+  }, [reloadTasks])
 
-          if (overTaskId && overTaskId !== taskId) {
-            const overIndex = tasksWithoutActive.findIndex((task) => task.id === overTaskId)
+  useEffect(() => {
+    if (!currentOrg?.id) return
 
-            if (overIndex !== -1 && tasksWithoutActive[overIndex].status === newStatus) {
-              const reordered = [...tasksWithoutActive]
-              reordered.splice(overIndex, 0, updatedTask)
-              return reordered
-            }
-          }
+    const keys = [
+      queryKeys.tasks(currentOrg.id),
+      ["task"],
+      ["taskActivity"],
+      ["workOrders"],
+      ["workOrder"],
+      queryKeys.events(currentOrg.id),
+      ["event"],
+      ["eventResources"],
+      ["zones"],
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.assets(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.movements(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+      queryKeys.staffMembers(currentOrg.id),
+      ["assignments"],
+      ["credentials"],
+    ] as Array<readonly unknown[]>
 
-          return insertTaskAtStatusEnd(tasksWithoutActive, updatedTask, newStatus)
-        })
-      },
-      addComment: (taskId, message, author, options) => {
-        const trimmedMessage = message.trim()
-        if (!trimmedMessage) return
+    return subscribeInvalidation(keys, () => {
+      if (skipNextInvalidationReloadRef.current) {
+        skipNextInvalidationReloadRef.current = false
+        return
+      }
 
-        setTasks((prev) =>
-          prev.map((task) => {
-            if (task.id !== taskId) return task
+      void reloadTasks().catch(() => {
+        // State already updated in reloadTasks.
+      })
+    })
+  }, [currentOrg?.id, reloadTasks])
 
-            const nextComments: TaskComment[] = [
-              ...(task.comments ?? []),
-              buildTaskActivityEntry({
-                authorId: author.id,
-                authorName: author.name,
-                authorAvatarUrl: author.avatarUrl,
-                message: trimmedMessage,
-                kind: "COMMENT",
-                imageUrl: options?.imageUrl,
-              }),
-            ]
+  const createTask = useCallback(async (input: TaskMutationInput) => {
+    const orgId = resolveOrgId(input.orgId)
 
-            return deriveTaskCounters({
-              ...task,
-              comments: nextComments,
-              updatedAt: new Date().toISOString(),
-            })
-          })
-        )
-      },
-      toggleChecklistItem: (taskId, itemId) => {
-        setTasks((prev) =>
-          prev.map((task) => {
-            if (task.id !== taskId || !task.checklist?.length) return task
+    const response = await tasksClient.create(orgId, {
+      title: input.title,
+      description: input.description,
+      status: input.status,
+      priority: input.priority,
+      type: input.type,
+      assigneeId: input.assigneeId ?? undefined,
+      eventId: input.eventId ?? undefined,
+      dueDate: input.dueDate,
+      relatedIncidentId: input.relatedIncidentId,
+      relatedWorkOrderId: input.relatedWorkOrderId,
+      relatedSponsorshipId: input.relatedSponsorshipId,
+      relatedLabel: input.relatedLabel,
+      labels: input.relatedLabel ? [input.relatedLabel] : undefined,
+      imageUrl: input.imageUrl ?? undefined,
+      imageKey: input.imageKey ?? undefined,
+    })
 
-            const nextChecklist = task.checklist.map((item) =>
-              item.id === itemId ? { ...item, done: !item.done } : item
-            )
+    const nextTask = mapTask(response)
+    setTasks((prev) => upsertTask(prev, nextTask))
+    triggerTaskInvalidation(orgId, nextTask)
+    return nextTask
+  }, [resolveOrgId, triggerTaskInvalidation])
 
-            return deriveTaskCounters({
-              ...task,
-              checklist: nextChecklist,
-              updatedAt: new Date().toISOString(),
-            })
-          })
-        )
-      },
-      addChecklistItem: (taskId, text) => {
-        const trimmedText = text.trim()
-        if (!trimmedText) return
+  const updateTask = useCallback(async (taskId: string, input: Partial<TaskMutationInput>) => {
+    const currentTask = tasksRef.current.find((item) => item.id === taskId)
+    const orgId = resolveOrgId(input.orgId ?? currentTask?.orgId)
 
-        setTasks((prev) =>
-          prev.map((task) => {
-            if (task.id !== taskId) return task
+    const response = await tasksClient.update(orgId, taskId, {
+      title: input.title,
+      description: input.description,
+      status: input.status,
+      priority: input.priority,
+      type: input.type,
+      assigneeId: input.assigneeId,
+      eventId: input.eventId,
+      dueDate: input.dueDate,
+      relatedIncidentId: input.relatedIncidentId,
+      relatedWorkOrderId: input.relatedWorkOrderId,
+      relatedSponsorshipId: input.relatedSponsorshipId,
+      relatedLabel: input.relatedLabel,
+      labels: input.relatedLabel ? [input.relatedLabel] : undefined,
+      imageUrl: input.imageUrl,
+      imageKey: input.imageKey,
+    })
 
-            const nextChecklist: TaskChecklistItem[] = [
-              ...(task.checklist ?? []),
-              {
-                id: `chk-${Date.now()}`,
-                text: trimmedText,
-                done: false,
-              },
-            ]
+    const nextTask = mapTask(response)
+    setTasks((prev) => upsertTask(prev, nextTask))
+    triggerTaskInvalidation(orgId, nextTask)
+    return nextTask
+  }, [resolveOrgId, triggerTaskInvalidation])
 
-            return deriveTaskCounters({
-              ...task,
-              checklist: nextChecklist,
-              updatedAt: new Date().toISOString(),
-            })
-          })
-        )
-      },
-    }),
-    [tasks, currentOrg, currentEvent]
-  )
+  const moveTask = useCallback(async (taskId: string, newStatus: TaskStatus, options?: MoveTaskOptions) => {
+    const previousTasks = tasksRef.current
+    const currentTask = previousTasks.find((item) => item.id === taskId)
+    const orgId = resolveOrgId(currentTask?.orgId)
+
+    setTasks((prev) => applyOptimisticMove(prev, taskId, newStatus, options?.overTaskId))
+
+    try {
+      const response = await tasksClient.move(orgId, taskId, {
+        status: newStatus,
+        overTaskId: options?.overTaskId,
+      })
+
+      const nextTask = appendStatusChangeComment(mapTask(response), currentTask?.status)
+      setTasks((prev) => upsertTask(prev, nextTask))
+      triggerTaskInvalidation(orgId, nextTask)
+      return nextTask
+    } catch (error) {
+      setTasks(previousTasks)
+      throw error
+    }
+  }, [resolveOrgId, triggerTaskInvalidation])
+
+  const addComment = useCallback(async (taskId: string, message: string, _author: TaskCommentAuthor, options?: AddCommentOptions) => {
+    const task = tasksRef.current.find((item) => item.id === taskId)
+    const orgId = resolveOrgId(task?.orgId)
+
+    const response = await tasksClient.addComment(orgId, taskId, {
+      message,
+      imageUrl: options?.imageUrl,
+    })
+
+    const nextTask = mapTask(response)
+    setTasks((prev) => upsertTask(prev, nextTask))
+    triggerTaskInvalidation(orgId, nextTask)
+    return nextTask
+  }, [resolveOrgId, triggerTaskInvalidation])
+
+  const toggleChecklistItem = useCallback(async (taskId: string, itemId: string) => {
+    const task = tasksRef.current.find((item) => item.id === taskId)
+    const orgId = resolveOrgId(task?.orgId)
+
+    const response = await tasksClient.toggleChecklistItem(orgId, taskId, itemId)
+    const nextTask = mapTask(response)
+    setTasks((prev) => upsertTask(prev, nextTask))
+    triggerTaskInvalidation(orgId, nextTask)
+    return nextTask
+  }, [resolveOrgId, triggerTaskInvalidation])
+
+  const addChecklistItem = useCallback(async (taskId: string, text: string) => {
+    const task = tasksRef.current.find((item) => item.id === taskId)
+    const orgId = resolveOrgId(task?.orgId)
+
+    const response = await tasksClient.addChecklistItem(orgId, taskId, text)
+    const nextTask = mapTask(response)
+    setTasks((prev) => upsertTask(prev, nextTask))
+    triggerTaskInvalidation(orgId, nextTask)
+    return nextTask
+  }, [resolveOrgId, triggerTaskInvalidation])
+
+  const value = useMemo<TasksBoardContextValue>(() => ({
+    tasks,
+    isLoading,
+    errorMessage,
+    reloadTasks,
+    createTask,
+    updateTask,
+    moveTask,
+    addComment,
+    toggleChecklistItem,
+    addChecklistItem,
+  }), [
+    addChecklistItem,
+    addComment,
+    createTask,
+    errorMessage,
+    isLoading,
+    moveTask,
+    reloadTasks,
+    tasks,
+    toggleChecklistItem,
+    updateTask,
+  ])
 
   return <TasksBoardContext.Provider value={value}>{children}</TasksBoardContext.Provider>
 }

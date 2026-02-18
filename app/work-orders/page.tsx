@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,8 +25,7 @@ import {
   Pencil,
   ListTodo,
 } from "lucide-react"
-import { mockStaff, mockWorkOrders } from "@/lib/mock-data"
-import type { WorkOrderStatus, SlaStatus, WorkOrder } from "@/lib/types"
+import type { WorkOrderStatus, SlaStatus } from "@/lib/types"
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import { useTasksBoard } from "@/lib/context/tasks-board-context"
@@ -35,72 +34,45 @@ import {
   type CreateWorkOrderPayload,
 } from "@/components/work-orders/create-work-order-dialog"
 import { TaskDialog, type TaskDialogValues } from "@/components/tasks/task-dialog"
+import {
+  workOrdersClient,
+  type ProviderServiceApiResponse,
+  type WorkOrderApiResponse,
+  type WorkOrderStatusApi,
+} from "@/lib/api/modules/work-orders-client"
+import { staffClient } from "@/lib/api/modules/staff-client"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 
-const initialWorkOrders: WorkOrder[] = [
-  ...mockWorkOrders,
-  {
-    id: "wo-6",
-    code: "WO-006",
-    title: "Scoreboards installation",
-    provider: "TechEvents",
-    category: "Electronics",
-    zone: "TATAMI 1",
-    status: "completed",
-    slaStatus: "on_time",
-    scheduledStart: "2025-03-15T05:00:00",
-    scheduledEnd: "2025-03-15T06:30:00",
-  },
-  {
-    id: "wo-7",
-    code: "WO-007",
-    title: "Catering setup - VIP area",
-    provider: "EventCatering",
-    category: "Hospitality",
-    zone: "VIP",
-    status: "scheduled",
-    slaStatus: "on_time",
-    scheduledStart: "2025-03-15T10:00:00",
-    scheduledEnd: "2025-03-15T11:00:00",
-  },
-  {
-    id: "wo-8",
-    code: "WO-008",
-    title: "Barrier setup - Main entrance",
-    provider: "SecurePro",
-    category: "Security",
-    zone: "ENTRANCE",
-    status: "in_progress",
-    slaStatus: "at_risk",
-    scheduledStart: "2025-03-15T06:00:00",
-    scheduledEnd: "2025-03-15T07:30:00",
-  },
-]
-
-const providerServices = [
-  "Logistics - LogiEvents",
-  "Security - SecurePro",
-  "Cleaning - CleanMax",
-  "Medical - MedTeam",
-  "Hospitality - EventCatering",
-  "Electronics - TechEvents",
-]
-
-const zones = ["TATAMI 1", "TATAMI 2", "TATAMI 3", "ENTRANCE", "VIP", "WARM-UP", "MEDICAL", "BACKSTAGE"]
-
-const statusMap: Record<CreateWorkOrderPayload["status"], WorkOrderStatus> = {
-  SCHEDULED: "scheduled",
-  IN_PROGRESS: "in_progress",
-  COMPLETED: "completed",
-  DELAYED: "delayed",
-  CANCELED: "cancelled",
+interface WorkOrderListItem {
+  id: string
+  title: string
+  description?: string
+  providerServiceId: string
+  provider: string
+  category: string
+  zoneId: string | null
+  zone: string
+  status: WorkOrderStatus
+  statusApi: WorkOrderStatusApi
+  slaStatus: SlaStatus
+  scheduledStart: string
+  scheduledEnd: string
 }
 
-const formStatusFromWorkOrder: Record<WorkOrderStatus, CreateWorkOrderPayload["status"]> = {
-  scheduled: "SCHEDULED",
-  in_progress: "IN_PROGRESS",
-  completed: "COMPLETED",
-  delayed: "DELAYED",
-  cancelled: "CANCELED",
+interface StaffAssigneeOption {
+  id: string
+  name: string
+  avatarUrl?: string
+}
+
+const formStatusFromApi: Record<WorkOrderStatusApi, CreateWorkOrderPayload["status"]> = {
+  SCHEDULED: "SCHEDULED",
+  ACCEPTED: "SCHEDULED",
+  IN_PROGRESS: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+  DELAYED: "DELAYED",
+  CANCELED: "CANCELED",
 }
 
 function toDateTimeInput(value: string): string {
@@ -113,6 +85,55 @@ function toDateTimeInput(value: string): string {
   )}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
+function mapStatus(status: WorkOrderStatusApi): WorkOrderStatus {
+  switch (status) {
+    case "IN_PROGRESS":
+      return "in_progress"
+    case "COMPLETED":
+      return "completed"
+    case "DELAYED":
+      return "delayed"
+    case "CANCELED":
+      return "cancelled"
+    case "ACCEPTED":
+    case "SCHEDULED":
+    default:
+      return "scheduled"
+  }
+}
+
+function mapSlaStatus(item: WorkOrderApiResponse): SlaStatus {
+  if (item.status === "DELAYED") return "breached"
+  if (typeof item.delayMinutes === "number" && item.delayMinutes > 0) return "breached"
+
+  const scheduledEnd = item.scheduledEndAt ? new Date(item.scheduledEndAt).getTime() : null
+  if (scheduledEnd && item.status !== "COMPLETED" && item.status !== "CANCELED") {
+    const now = Date.now()
+    if (now > scheduledEnd) return "breached"
+    if (scheduledEnd - now <= 30 * 60 * 1000) return "at_risk"
+  }
+
+  return "on_time"
+}
+
+function mapWorkOrder(item: WorkOrderApiResponse): WorkOrderListItem {
+  return {
+    id: item.id,
+    title: item.title,
+    description: item.description ?? undefined,
+    providerServiceId: item.providerServiceId,
+    provider: item.providerService?.provider?.name ?? "Provider",
+    category: item.providerService?.category ?? "OTHER",
+    zoneId: item.zoneId,
+    zone: item.zone?.name ?? "UNASSIGNED",
+    status: mapStatus(item.status),
+    statusApi: item.status,
+    slaStatus: mapSlaStatus(item),
+    scheduledStart: item.scheduledStartAt ?? "",
+    scheduledEnd: item.scheduledEndAt ?? "",
+  }
+}
+
 export default function WorkOrdersPage() {
   const { events, currentEvent, currentOrg } = useAuth()
   const { toast } = useToast()
@@ -120,10 +141,17 @@ export default function WorkOrdersPage() {
   const canEdit = true
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null)
+  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrderListItem | null>(null)
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
   const [taskPrefill, setTaskPrefill] = useState<Partial<TaskDialogValues> | undefined>(undefined)
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(initialWorkOrders)
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [workOrders, setWorkOrders] = useState<WorkOrderListItem[]>([])
+  const [providerServices, setProviderServices] = useState<ProviderServiceApiResponse[]>([])
+  const [zones, setZones] = useState<Array<{ id: string; name: string }>>([])
+  const [assignees, setAssignees] = useState<StaffAssigneeOption[]>([])
+
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
@@ -131,6 +159,15 @@ export default function WorkOrdersPage() {
   const categories = useMemo(
     () => [...new Set(workOrders.map((workOrder) => workOrder.category))],
     [workOrders]
+  )
+
+  const providerServiceOptions = useMemo(
+    () =>
+      providerServices.map((service) => ({
+        id: service.id,
+        label: `${service.category} - ${service.provider?.name ?? "Provider"} - ${service.name}`,
+      })),
+    [providerServices]
   )
 
   const filteredWorkOrders = useMemo(
@@ -141,7 +178,7 @@ export default function WorkOrdersPage() {
         const matchesSearch =
           searchQuery === "" ||
           workOrder.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          workOrder.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          workOrder.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
           workOrder.provider.toLowerCase().includes(searchQuery.toLowerCase())
 
         return matchesStatus && matchesCategory && matchesSearch
@@ -149,66 +186,156 @@ export default function WorkOrdersPage() {
     [workOrders, statusFilter, categoryFilter, searchQuery]
   )
 
-  const handleCreateWorkOrder = (payload: CreateWorkOrderPayload) => {
-    console.log("Create Work Order payload", payload)
-
-    const [categoryPart, providerPart] = payload.providerService.split(" - ")
-
-    const nextWorkOrder: WorkOrder = {
-      id: `wo-${Date.now()}`,
-      code: `WO-${String(workOrders.length + 1).padStart(3, "0")}`,
-      title: payload.title,
-      description: payload.description,
-      provider: providerPart ?? payload.providerService,
-      category: categoryPart ?? "General",
-      zone: payload.zone ?? "UNASSIGNED",
-      status: statusMap[payload.status],
-      slaStatus: "on_time",
-      scheduledStart: payload.scheduledStart,
-      scheduledEnd: payload.scheduledEnd,
+  const loadData = useCallback(async () => {
+    if (!currentOrg?.id || !currentEvent?.id) {
+      setWorkOrders([])
+      setProviderServices([])
+      setZones([])
+      setAssignees([])
+      return
     }
 
-    setWorkOrders((prev) => [nextWorkOrder, ...prev])
+    setIsLoading(true)
 
-    toast({
-      title: "Work order created",
-      description: `${payload.title} was added to local mock data.`,
+    try {
+      const [workOrdersResponse, providerServicesResponse, zonesResponse, assignmentsResponse] = await Promise.all([
+        workOrdersClient.list(currentOrg.id, currentEvent.id),
+        workOrdersClient.listProviderServices(currentOrg.id, currentEvent.id),
+        workOrdersClient.listZones(currentOrg.id, currentEvent.id),
+        staffClient.listAssignments(currentOrg.id, currentEvent.id),
+      ])
+
+      setWorkOrders(workOrdersResponse.map(mapWorkOrder))
+      setProviderServices(providerServicesResponse)
+      setZones(zonesResponse.map((zone) => ({ id: zone.id, name: zone.name })))
+
+      const mappedAssignees = assignmentsResponse
+        .map((assignment) => ({
+          id: assignment.staffMemberId,
+          name: assignment.staffMember?.fullName ?? assignment.staffMemberId,
+        }))
+        .filter((entry) => entry.id && entry.name)
+
+      const uniqueAssignees = Array.from(new Map(mappedAssignees.map((entry) => [entry.id, entry])).values())
+      setAssignees(uniqueAssignees)
+    } catch (error) {
+      setWorkOrders([])
+      setProviderServices([])
+      setZones([])
+      setAssignees([])
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible cargar work orders.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentEvent?.id, currentOrg?.id, toast])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    if (!currentOrg?.id || !currentEvent?.id) return
+
+    const keys = [
+      queryKeys.workOrders(currentEvent.id),
+      queryKeys.event(currentOrg.id, currentEvent.id),
+      queryKeys.events(currentOrg.id),
+      queryKeys.eventResources(currentEvent.id),
+      queryKeys.zones(currentEvent.id),
+      queryKeys.tasks(currentOrg.id),
+      queryKeys.assignments(currentEvent.id),
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      void loadData()
     })
-  }
+  }, [currentEvent?.id, currentOrg?.id, loadData])
 
-  const handleEditWorkOrder = (payload: CreateWorkOrderPayload) => {
-    if (!editingWorkOrder) return
+  const handleCreateWorkOrder = async (payload: CreateWorkOrderPayload) => {
+    if (!currentOrg?.id || !currentEvent?.id) return
 
-    console.log("Edit Work Order payload", payload)
+    setIsSaving(true)
+    try {
+      const created = await workOrdersClient.create(currentOrg.id, currentEvent.id, payload.providerServiceId, {
+        title: payload.title,
+        description: payload.description,
+        zoneId: payload.zoneId ?? undefined,
+        scheduledStartAt: payload.scheduledStart,
+        scheduledEndAt: payload.scheduledEnd,
+      })
 
-    const [categoryPart, providerPart] = payload.providerService.split(" - ")
+      if (payload.status !== "SCHEDULED") {
+        await workOrdersClient.updateStatus(currentOrg.id, currentEvent.id, created.id, payload.status)
+      }
 
-    setWorkOrders((prev) =>
-      prev.map((workOrder) =>
-        workOrder.id === editingWorkOrder.id
-          ? {
-              ...workOrder,
-              title: payload.title,
-              description: payload.description,
-              provider: providerPart ?? payload.providerService,
-              category: categoryPart ?? workOrder.category,
-              zone: payload.zone ?? "UNASSIGNED",
-              scheduledStart: payload.scheduledStart,
-              scheduledEnd: payload.scheduledEnd,
-              status: statusMap[payload.status],
-            }
-          : workOrder
+      invalidateQueryKeys(
+        queryKeys.workOrders(currentEvent.id),
+        queryKeys.event(currentOrg.id, currentEvent.id),
+        queryKeys.events(currentOrg.id),
       )
-    )
 
-    setEditingWorkOrder(null)
-    toast({
-      title: "Work order updated",
-      description: `${payload.title} was updated in local mock data.`,
-    })
+      toast({
+        title: "Work order created",
+        description: `${payload.title} creada correctamente.`,
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible crear work order.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  const handleCreateTaskFromWorkOrder = (workOrder: WorkOrder) => {
+  const handleEditWorkOrder = async (payload: CreateWorkOrderPayload) => {
+    if (!currentOrg?.id || !currentEvent?.id || !editingWorkOrder) return
+
+    setIsSaving(true)
+    try {
+      await workOrdersClient.update(currentOrg.id, currentEvent.id, editingWorkOrder.id, {
+        title: payload.title,
+        description: payload.description,
+        zoneId: payload.zoneId,
+        providerServiceId: payload.providerServiceId,
+        scheduledStartAt: payload.scheduledStart,
+        scheduledEndAt: payload.scheduledEnd,
+      })
+
+      const nextStatus = payload.status
+      if (nextStatus !== formStatusFromApi[editingWorkOrder.statusApi]) {
+        await workOrdersClient.updateStatus(currentOrg.id, currentEvent.id, editingWorkOrder.id, nextStatus)
+      }
+
+      setEditingWorkOrder(null)
+
+      invalidateQueryKeys(
+        queryKeys.workOrders(currentEvent.id),
+        queryKeys.workOrder(editingWorkOrder.id),
+        queryKeys.event(currentOrg.id, currentEvent.id),
+      )
+
+      toast({
+        title: "Work order updated",
+        description: `${payload.title} actualizada correctamente.`,
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible actualizar work order.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCreateTaskFromWorkOrder = (workOrder: WorkOrderListItem) => {
     const contextPayload: Partial<TaskDialogValues> = {
       title: `Follow up: ${workOrder.title}`,
       description: workOrder.description,
@@ -217,25 +344,45 @@ export default function WorkOrdersPage() {
       type: "WORK_ORDER",
       eventId: currentEvent?.id ?? events[0]?.id ?? null,
       relatedWorkOrderId: workOrder.id,
-      relatedLabel: `${workOrder.code} ${workOrder.title}`,
+      relatedLabel: `${workOrder.provider} - ${workOrder.title}`,
     }
 
-    console.log("Create task from work order context", contextPayload)
     setTaskPrefill(contextPayload)
     setIsTaskDialogOpen(true)
   }
 
-  const handleSubmitTask = (payload: TaskDialogValues) => {
-    createTask({
-      ...payload,
-      orgId: currentOrg?.id || "org-1",
-      eventId: payload.eventId ?? currentEvent?.id ?? null,
-    })
-    toast({
-      title: "Task created",
-      description: "Task was added to the board in local mock data.",
-    })
-    setTaskPrefill(undefined)
+  const handleSubmitTask = async (payload: TaskDialogValues) => {
+    try {
+      const eventId = payload.eventId ?? currentEvent?.id ?? null
+      const createdTask = await createTask({
+        ...payload,
+        orgId: currentOrg?.id,
+        eventId,
+      })
+
+      if (currentOrg?.id && eventId) {
+        invalidateQueryKeys(
+          queryKeys.tasks(currentOrg.id),
+          queryKeys.task(createdTask.id),
+          queryKeys.workOrders(eventId),
+          queryKeys.event(currentOrg.id, eventId),
+        )
+      }
+
+      toast({
+        title: "Task created",
+        description: "Task guardada correctamente.",
+      })
+      setTaskPrefill(undefined)
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible crear task.",
+        variant: "destructive",
+      })
+      return false
+    }
   }
 
   const getStatusBadge = (status: WorkOrderStatus) => {
@@ -303,7 +450,10 @@ export default function WorkOrdersPage() {
               <p className="mt-2 text-sm text-amber-400">Select an event to create work orders.</p>
             )}
           </div>
-          <Button onClick={() => setIsCreateOpen(true)} disabled={events.length === 0}>
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            disabled={events.length === 0 || providerServiceOptions.length === 0 || isSaving}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Create Work Order
           </Button>
@@ -342,10 +492,13 @@ export default function WorkOrdersPage() {
                   <SelectItem value="delayed" className="text-white focus:bg-[#2B2B30] focus:text-white">
                     Delayed
                   </SelectItem>
+                  <SelectItem value="cancelled" className="text-white focus:bg-[#2B2B30] focus:text-white">
+                    Cancelled
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-[150px] bg-[#1A1A1F] border-[#2B2B30] text-white">
+                <SelectTrigger className="w-[170px] bg-[#1A1A1F] border-[#2B2B30] text-white">
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1A1A1F] border-[#2B2B30]">
@@ -372,7 +525,7 @@ export default function WorkOrdersPage() {
             <table className="w-full">
               <thead>
                 <tr className="text-left text-xs text-gray-500 uppercase border-b border-[#1F1F23] bg-[#1A1A1F]">
-                  <th className="px-6 py-4 font-medium">Code</th>
+                  <th className="px-6 py-4 font-medium">ID</th>
                   <th className="px-6 py-4 font-medium">Title</th>
                   <th className="px-6 py-4 font-medium">Provider</th>
                   <th className="px-6 py-4 font-medium">Zone</th>
@@ -383,65 +536,73 @@ export default function WorkOrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredWorkOrders.map((workOrder) => (
-                  <tr
-                    key={workOrder.id}
-                    className="border-b border-[#1F1F23] hover:bg-[#1A1A1F] transition-colors"
-                  >
-                    <td className="px-6 py-4">
-                      <span className="text-sm font-mono text-white">{workOrder.code}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-gray-200">{workOrder.title}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div>
-                        <span className="text-sm text-gray-200">{workOrder.provider}</span>
-                        <p className="text-xs text-gray-500">{workOrder.category}</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-gray-300">{workOrder.zone}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm">
-                        <span className="text-gray-300">
-                          {new Date(workOrder.scheduledStart).toLocaleTimeString("es-CL", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                        <span className="text-gray-500"> - </span>
-                        <span className="text-gray-300">
-                          {new Date(workOrder.scheduledEnd).toLocaleTimeString("es-CL", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">{getStatusBadge(workOrder.status)}</td>
-                    <td className="px-6 py-4 text-center">{getSlaIcon(workOrder.slaStatus)}</td>
-                    {canEdit && (
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromWorkOrder(workOrder)}>
-                            <ListTodo className="mr-2 h-3.5 w-3.5" />
-                            Create task
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setEditingWorkOrder(workOrder)}>
-                            <Pencil className="mr-2 h-3.5 w-3.5" />
-                            Edit
-                          </Button>
+                {!isLoading &&
+                  filteredWorkOrders.map((workOrder) => (
+                    <tr
+                      key={workOrder.id}
+                      className="border-b border-[#1F1F23] hover:bg-[#1A1A1F] transition-colors"
+                    >
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-mono text-white">{workOrder.id.slice(0, 12)}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-200">{workOrder.title}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div>
+                          <span className="text-sm text-gray-200">{workOrder.provider}</span>
+                          <p className="text-xs text-gray-500">{workOrder.category}</p>
                         </div>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-300">{workOrder.zone}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm">
+                          {workOrder.scheduledStart && workOrder.scheduledEnd ? (
+                            <>
+                              <span className="text-gray-300">
+                                {new Date(workOrder.scheduledStart).toLocaleTimeString("es-CL", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              <span className="text-gray-500"> - </span>
+                              <span className="text-gray-300">
+                                {new Date(workOrder.scheduledEnd).toLocaleTimeString("es-CL", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-gray-500">Not scheduled</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">{getStatusBadge(workOrder.status)}</td>
+                      <td className="px-6 py-4 text-center">{getSlaIcon(workOrder.slaStatus)}</td>
+                      {canEdit && (
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => handleCreateTaskFromWorkOrder(workOrder)}>
+                              <ListTodo className="mr-2 h-3.5 w-3.5" />
+                              Create task
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setEditingWorkOrder(workOrder)}>
+                              <Pencil className="mr-2 h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
-          {filteredWorkOrders.length === 0 && (
+          {isLoading && <div className="text-center py-12 text-gray-500">Loading work orders...</div>}
+          {!isLoading && filteredWorkOrders.length === 0 && (
             <div className="text-center py-12 text-gray-500">No work orders found</div>
           )}
         </div>
@@ -469,9 +630,11 @@ export default function WorkOrdersPage() {
         onOpenChange={setIsCreateOpen}
         events={events.map((event) => ({ id: event.id, name: event.name }))}
         selectedEventId={currentEvent?.id}
-        providerServices={providerServices}
+        providerServices={providerServiceOptions}
         zones={zones}
-        onCreate={handleCreateWorkOrder}
+        onCreate={(payload) => {
+          void handleCreateWorkOrder(payload)
+        }}
       />
       <CreateWorkOrderDialog
         open={editingWorkOrder !== null}
@@ -483,21 +646,23 @@ export default function WorkOrdersPage() {
           editingWorkOrder
             ? {
                 eventId: currentEvent?.id || events[0]?.id || "",
-                providerService: `${editingWorkOrder.category} - ${editingWorkOrder.provider}`,
-                zone: editingWorkOrder.zone === "UNASSIGNED" ? null : editingWorkOrder.zone,
+                providerServiceId: editingWorkOrder.providerServiceId,
+                zoneId: editingWorkOrder.zoneId,
                 title: editingWorkOrder.title,
                 description: editingWorkOrder.description || "",
                 scheduledStart: toDateTimeInput(editingWorkOrder.scheduledStart),
                 scheduledEnd: toDateTimeInput(editingWorkOrder.scheduledEnd),
-                status: formStatusFromWorkOrder[editingWorkOrder.status],
+                status: formStatusFromApi[editingWorkOrder.statusApi],
               }
             : undefined
         }
         events={events.map((event) => ({ id: event.id, name: event.name }))}
         selectedEventId={currentEvent?.id}
-        providerServices={providerServices}
+        providerServices={providerServiceOptions}
         zones={zones}
-        onCreate={handleEditWorkOrder}
+        onCreate={(payload) => {
+          void handleEditWorkOrder(payload)
+        }}
       />
       <TaskDialog
         open={isTaskDialogOpen}
@@ -508,7 +673,7 @@ export default function WorkOrdersPage() {
         mode="create"
         initialValues={taskPrefill}
         events={events.map((event) => ({ id: event.id, name: event.name }))}
-        assignees={mockStaff.map((staff) => ({ id: staff.id, name: staff.name, avatarUrl: staff.avatarUrl || staff.avatar }))}
+        assignees={assignees}
         onSubmit={handleSubmitTask}
       />
     </Layout>

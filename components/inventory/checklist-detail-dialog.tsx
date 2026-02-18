@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { AssetCondition, InventoryChecklist, SignChecklistDto, VerifyChecklistItemDto } from "@/lib/inventory/types"
+import type { InventoryChecklist, InventoryChecklistItemCondition, SignChecklistDto, VerifyChecklistItemDto } from "@/lib/inventory/types"
 import { SignaturePad } from "./signature-pad"
 
 interface ChecklistDetailDialogProps {
@@ -22,12 +22,12 @@ interface ChecklistDetailDialogProps {
 }
 
 interface ItemDraft {
-  checkedQty: number
-  condition: AssetCondition | null
+  quantityVerified: number
+  condition: InventoryChecklistItemCondition
   notes: string
 }
 
-const CONDITION_OPTIONS: AssetCondition[] = ["NEW", "GOOD", "FAIR", "POOR", "BROKEN"]
+const CONDITION_OPTIONS: InventoryChecklistItemCondition[] = ["GOOD", "DAMAGED", "MISSING"]
 
 function statusBadgeClass(status: string): string {
   const normalized = status.toUpperCase()
@@ -43,8 +43,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
   const [error, setError] = useState<string | null>(null)
 
   const isSigned = useMemo(() => {
-    const status = checklist?.status?.toUpperCase() || ""
-    return ["SIGNED", "COMPLETED", "CLOSED"].includes(status)
+    return (checklist?.status || "").toUpperCase() === "SIGNED"
   }, [checklist?.status])
 
   useEffect(() => {
@@ -53,7 +52,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
     const nextDrafts: Record<string, ItemDraft> = {}
     checklist.items.forEach((item) => {
       nextDrafts[item.id] = {
-        checkedQty: item.checkedQty ?? 0,
+        quantityVerified: item.quantityVerified ?? 0,
         condition: item.condition ?? "GOOD",
         notes: item.notes || "",
       }
@@ -70,14 +69,23 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
   if (!checklist) return null
 
   async function handleVerify(itemId: string) {
+    if (!checklist) return
     const draft = drafts[itemId]
+    const checklistItem = checklist.items.find((item) => item.id === itemId)
     if (!draft) return
+    if (!checklistItem) return
+    if (!signerName.trim()) {
+      setError("Debes indicar quién verifica antes de validar ítems.")
+      return
+    }
 
     const success = await onVerifyItem({
-      itemId,
-      checkedQty: Math.max(0, Number(draft.checkedQty) || 0),
+      assetId: checklistItem.assetId,
+      verified: true,
+      quantityVerified: Math.max(0, Number(draft.quantityVerified) || 0),
+      verifiedBy: signerName.trim(),
       condition: draft.condition,
-      notes: draft.notes || null,
+      notes: draft.notes || undefined,
     })
 
     if (!success) {
@@ -89,14 +97,19 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
   }
 
   async function handleSignChecklist() {
+    if (!checklist) return
     if (!signatureDataUrl) {
       setError("Debes registrar una firma antes de firmar.")
       return
     }
+    if (!signerName.trim()) {
+      setError("Debes indicar el nombre de quien firma.")
+      return
+    }
 
     const success = await onSign({
-      signatureDataUrl,
-      signerName: signerName.trim() || null,
+      signatureData: signatureDataUrl,
+      signedBy: signerName.trim(),
     })
 
     if (!success) {
@@ -108,6 +121,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
   }
 
   async function handleDeleteChecklist() {
+    if (!checklist) return
     const success = await onDelete()
     if (success) onOpenChange(false)
   }
@@ -118,7 +132,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
         <DialogHeader>
           <DialogTitle>Checklist {checklist.id}</DialogTitle>
           <DialogDescription>
-            {checklist.type} · {checklist.eventName || checklist.eventId || "Sin evento"}
+            {checklist.checklistType} · {checklist.eventName || checklist.eventId || "Sin evento"}
           </DialogDescription>
         </DialogHeader>
 
@@ -149,20 +163,21 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
                 return (
                   <tr key={item.id} className="border-b border-[#2B2B30] bg-[#10131A] text-gray-300">
                     <td className="px-3 py-2 text-white">{item.assetName}</td>
-                    <td className="px-3 py-2">{item.assetId}</td>
-                    <td className="px-3 py-2">{item.expectedQty}</td>
+                    <td className="px-3 py-2">{item.assetCodeOrTag || item.assetId}</td>
+                    <td className="px-3 py-2">{item.quantityExpected}</td>
                     <td className="px-3 py-2">
                       <Input
                         type="number"
                         min={0}
-                        value={draft?.checkedQty ?? 0}
+                        max={item.quantityExpected}
+                        value={draft?.quantityVerified ?? 0}
                         disabled={isSigned}
                         className="h-8 w-24 border-[#2B2B30] bg-[#171A22]"
                         onChange={(event) =>
                           setDrafts((prev) => ({
                             ...prev,
                             [item.id]: {
-                              checkedQty: Number(event.target.value) || 0,
+                              quantityVerified: Number(event.target.value) || 0,
                               condition: prev[item.id]?.condition ?? "GOOD",
                               notes: prev[item.id]?.notes || "",
                             },
@@ -177,8 +192,8 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
                           setDrafts((prev) => ({
                             ...prev,
                             [item.id]: {
-                              checkedQty: prev[item.id]?.checkedQty ?? 0,
-                              condition: value as AssetCondition,
+                              quantityVerified: prev[item.id]?.quantityVerified ?? 0,
+                              condition: value as InventoryChecklistItemCondition,
                               notes: prev[item.id]?.notes || "",
                             },
                           }))
@@ -206,7 +221,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
                           setDrafts((prev) => ({
                             ...prev,
                             [item.id]: {
-                              checkedQty: prev[item.id]?.checkedQty ?? 0,
+                              quantityVerified: prev[item.id]?.quantityVerified ?? 0,
                               condition: prev[item.id]?.condition ?? "GOOD",
                               notes: event.target.value,
                             },
@@ -215,9 +230,9 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <Button size="sm" disabled={isSubmitting || isSigned} onClick={() => void handleVerify(item.id)}>
-                        Verificar
-                      </Button>
+                  <Button size="sm" disabled={isSubmitting || isSigned} onClick={() => void handleVerify(item.id)}>
+                    Verificar
+                  </Button>
                     </td>
                   </tr>
                 )
@@ -227,7 +242,7 @@ export function ChecklistDetailDialog({ open, onOpenChange, checklist, isSubmitt
         </div>
 
         <div className="space-y-2">
-          <Label>Firmante</Label>
+          <Label>Verificado por / Firmante</Label>
           <Input
             value={signerName}
             onChange={(event) => setSignerName(event.target.value)}

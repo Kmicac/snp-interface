@@ -1,7 +1,5 @@
-export type InventoryRole = 'admin' | 'manager' | 'member' | 'viewer'
-
-export type AssetStatus = 'IN_STORAGE' | 'IN_USE' | 'DAMAGED' | 'UNDER_REPAIR' | 'LOST' | 'RETIRED'
-export type AssetCondition = 'NEW' | 'GOOD' | 'FAIR' | 'POOR' | 'BROKEN'
+export type AssetStatus = "IN_STORAGE" | "IN_USE" | "DAMAGED" | "UNDER_REPAIR" | "LOST" | "RETIRED"
+export type AssetCondition = "NEW" | "GOOD" | "FAIR" | "POOR" | "BROKEN"
 
 export interface AssetCategory {
   id: string
@@ -31,31 +29,30 @@ export interface Asset {
 }
 
 export interface CreateAssetDto {
-  categoryId?: string | null
+  categoryId?: string
   name: string
-  assetTag?: string | null
-  serialNumber?: string | null
+  assetTag?: string
+  serialNumber?: string
   quantity: number
-  status: AssetStatus
   condition: AssetCondition
-  location?: string | null
-  notes?: string | null
-  imageUrl?: string | null
-  imageKey?: string | null
+  location?: string
+  notes?: string
+  imageUrl?: string
+  imageKey?: string
 }
 
 export interface UpdateAssetDto {
-  categoryId?: string | null
+  categoryId?: string
   name?: string
-  assetTag?: string | null
-  serialNumber?: string | null
+  assetTag?: string
+  serialNumber?: string
   quantity?: number
   status?: AssetStatus
   condition?: AssetCondition
-  location?: string | null
-  notes?: string | null
-  imageUrl?: string | null
-  imageKey?: string | null
+  location?: string
+  notes?: string
+  imageUrl?: string
+  imageKey?: string
 }
 
 export interface InventoryDashboardStats {
@@ -73,14 +70,14 @@ export interface InventoryDashboardStats {
 }
 
 export interface InventoryDashboardCategorySummary {
-  categoryId?: string
+  categoryId?: string | null
   categoryName: string
   totalQuantity: number
   inStorageQuantity?: number
   inUseQuantity?: number
 }
 
-export type MovementType = 'CHECKOUT' | 'RETURN' | 'TRANSFER' | 'ADJUSTMENT' | 'KIT_APPLIED'
+export type MovementType = "CHECK_OUT" | "CHECK_IN" | "MAINTENANCE" | "ADJUSTMENT"
 
 export interface InventoryMovement {
   id: string
@@ -89,14 +86,16 @@ export interface InventoryMovement {
   assetName?: string
   eventId?: string | null
   eventName?: string | null
-  type: MovementType
+  movementType: MovementType
+  type?: MovementType
   quantity: number
   fromLocation?: string | null
   toLocation?: string | null
   notes?: string | null
-  createdBy?: string | null
-  createdByName?: string | null
+  performedByUserId?: string | null
+  performedBy?: string | null
   createdAt: string
+  timestamp?: string
 }
 
 export interface InventoryMovementsResponse {
@@ -108,9 +107,12 @@ export interface InventoryMovementsResponse {
 
 export interface InventoryKitItem {
   id?: string
-  assetId: string
+  assetId?: string | null
+  categoryId?: string | null
+  name: string
   quantity: number
   asset?: Asset | null
+  category?: AssetCategory | null
 }
 
 export interface InventoryKit {
@@ -127,9 +129,11 @@ export interface InventoryKit {
 export interface CreateKitDto {
   name: string
   description?: string | null
-  eventType?: string | null
+  eventType: string
   items: Array<{
-    assetId: string
+    assetId?: string
+    categoryId?: string
+    name: string
     quantity: number
   }>
 }
@@ -139,64 +143,77 @@ export interface UpdateKitDto {
   description?: string | null
   eventType?: string | null
   items?: Array<{
-    assetId: string
+    assetId?: string
+    categoryId?: string
+    name: string
     quantity: number
   }>
 }
 
-export type ChecklistType = 'CHECKOUT' | 'RETURN'
-export type ChecklistStatus = 'OPEN' | 'SIGNED' | 'CLOSED' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
+export type ChecklistType = "LOADING" | "UNLOADING" | "RETURN"
+export type ChecklistStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "SIGNED"
+export type InventoryChecklistItemCondition = "GOOD" | "DAMAGED" | "MISSING"
 
 export interface InventoryChecklistItem {
   id: string
   assetId: string
   assetName: string
-  expectedQty: number
-  checkedQty?: number
-  verified?: boolean
-  condition?: AssetCondition | null
+  assetCodeOrTag: string
+  quantityExpected: number
+  quantityVerified: number
+  verified: boolean
+  verifiedAt?: string | null
+  verifiedBy?: string | null
+  condition: InventoryChecklistItemCondition
   notes?: string | null
 }
 
-export interface InventoryChecklist {
+export interface InventoryChecklistListItem {
   id: string
   orgId?: string
-  eventId?: string | null
-  eventName?: string | null
-  type: ChecklistType
-  status: ChecklistStatus
+  eventId?: string
+  eventName?: string
+  checklistNumber: string
+  checklistType: ChecklistType
+  responsibleName?: string | null
   notes?: string | null
-  items: InventoryChecklistItem[]
+  status: ChecklistStatus
+  totalItems: number
+  verifiedItems: number
+  missingItems: number
   signedBy?: string | null
   signedAt?: string | null
   createdAt: string
   updatedAt?: string
 }
 
+export interface InventoryChecklist extends InventoryChecklistListItem {
+  items: InventoryChecklistItem[]
+}
+
 export interface CreateChecklistDto {
-  eventId?: string | null
-  type: ChecklistType
-  notes?: string | null
-  items: Array<{
-    assetId: string
-    expectedQty: number
-  }>
+  eventId: string
+  checklistType: ChecklistType
+  responsibleName?: string
+  notes?: string
 }
 
 export interface VerifyChecklistItemDto {
-  itemId: string
-  checkedQty: number
-  condition?: AssetCondition | null
-  notes?: string | null
+  assetId: string
+  verified: boolean
+  quantityVerified: number
+  verifiedBy: string
+  condition: InventoryChecklistItemCondition
+  notes?: string
 }
 
 export interface SignChecklistDto {
-  signatureDataUrl: string
-  signerName?: string | null
+  signedBy: string
+  signatureData: string
 }
 
 export interface AssetQrResponse {
-  assetId: string
-  qrData: string
-  qrImageUrl?: string
+  id: string
+  qrContent: string
+  qrImage?: string | null
 }

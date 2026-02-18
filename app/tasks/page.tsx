@@ -18,8 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useAuth } from "@/lib/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import { uploadImage } from "@/lib/api/upload-image"
+import { staffClient } from "@/lib/api/modules/staff-client"
 import { useTasksBoard } from "@/lib/context/tasks-board-context"
-import { mockStaff } from "@/lib/mock-data"
 import type { Task, TaskStatus, TaskType } from "@/lib/types"
 
 const boardColumns: { status: TaskStatus; label: string }[] = [
@@ -117,28 +117,13 @@ function taskMatchesLabel(task: Task, label: TaskLabelFilter): boolean {
   }
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result)
-        return
-      }
-      reject(new Error("Could not generate image preview"))
-    }
-    reader.onerror = () => reject(new Error("Could not read image file"))
-    reader.readAsDataURL(file)
-  })
-}
-
 export default function TasksPage() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { currentOrg, currentEvent, events } = useAuth()
   const { toast } = useToast()
-  const { tasks, createTask, updateTask, moveTask } = useTasksBoard()
+  const { tasks, isLoading, errorMessage, createTask, updateTask, moveTask } = useTasksBoard()
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -153,16 +138,7 @@ export default function TasksPage() {
   const [selectedTypes, setSelectedTypes] = useState<TaskType[]>([])
   const [selectedLabels, setSelectedLabels] = useState<TaskLabelFilter[]>([])
   const [filtersReady, setFiltersReady] = useState(false)
-
-  const assignees = useMemo(
-    () =>
-      mockStaff.map((staff) => ({
-        id: staff.id,
-        name: staff.name,
-        avatarUrl: staff.avatarUrl || staff.avatar,
-      })),
-    []
-  )
+  const [assignees, setAssignees] = useState<Array<{ id: string; name: string; avatarUrl?: string }>>([])
 
   useEffect(() => {
     const queryStatuses = splitCsv(searchParams.get("status")).filter(isTaskStatus)
@@ -240,6 +216,39 @@ export default function TasksPage() {
     }
   }, [filtersReady, pathname, router, searchParams, selectedLabels, selectedStatuses, selectedTypes])
 
+  useEffect(() => {
+    if (!currentOrg?.id || !currentEvent?.id) {
+      setAssignees([])
+      return
+    }
+
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const response = await staffClient.listAssignments(currentOrg.id, currentEvent.id)
+        if (cancelled) return
+
+        const mapped = response
+          .map((assignment) => ({
+            id: assignment.staffMemberId,
+            name: assignment.staffMember?.fullName ?? assignment.staffMemberId,
+          }))
+          .filter((entry) => entry.id && entry.name)
+
+        setAssignees(Array.from(new Map(mapped.map((entry) => [entry.id, entry])).values()))
+      } catch {
+        if (!cancelled) {
+          setAssignees([])
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentEvent?.id, currentOrg?.id])
+
   const visibleTasks = useMemo(
     () =>
       tasks.filter((task) => {
@@ -266,7 +275,14 @@ export default function TasksPage() {
     () =>
       boardColumns.reduce(
         (acc, column) => {
-          acc[column.status] = filteredTasks.filter((task) => task.status === column.status)
+          acc[column.status] = filteredTasks
+            .filter((task) => task.status === column.status)
+            .sort((left, right) => {
+              const leftPosition = typeof left.position === "number" ? left.position : Number.MAX_SAFE_INTEGER
+              const rightPosition = typeof right.position === "number" ? right.position : Number.MAX_SAFE_INTEGER
+              if (leftPosition !== rightPosition) return leftPosition - rightPosition
+              return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+            })
           return acc
         },
         {} as Record<TaskStatus, Task[]>
@@ -332,7 +348,8 @@ export default function TasksPage() {
   }
 
   const handleDragOver = (event: DragOverEvent) => {
-    setActiveDropStatus(getStatusFromDndId(event.over?.id))
+    const nextStatus = getStatusFromDndId(event.over?.id)
+    setActiveDropStatus((current) => (current === nextStatus ? current : nextStatus))
   }
 
   const resetDragState = () => {
@@ -352,10 +369,16 @@ export default function TasksPage() {
     const overTaskId = overId && boardTaskById.has(overId) ? overId : undefined
 
     if (sourceStatus && destinationStatus && (sourceStatus !== destinationStatus || (overTaskId && overTaskId !== taskId))) {
-      moveTask(taskId, destinationStatus, {
+      void moveTask(taskId, destinationStatus, {
         source: "tasks_board_dnd",
         reason: "column_drop",
         overTaskId,
+      }).catch((error) => {
+        toast({
+          title: "Could not move task",
+          description: error instanceof Error ? error.message : "Try again.",
+          variant: "destructive",
+        })
       })
     }
 
@@ -369,8 +392,8 @@ export default function TasksPage() {
   const resolveTaskImage = async (payload: TaskDialogValues, entityId?: string) => {
     if (payload.clearImage) {
       return {
-        imageUrl: undefined,
-        imageKey: undefined,
+        imageUrl: null,
+        imageKey: null,
       }
     }
 
@@ -381,33 +404,20 @@ export default function TasksPage() {
       }
     }
 
-    if (currentOrg?.id) {
-      try {
-        const upload = await uploadImage({
-          file: payload.imageFile,
-          folder: `orgs/${currentOrg.id}/tasks`,
-          entityId,
-        })
-        return {
-          imageUrl: upload.url,
-          imageKey: upload.key,
-        }
-      } catch (error) {
-        toast({
-          title: "Attachment fallback",
-          description:
-            error instanceof Error
-              ? `${error.message}. Using local preview while backend integration is completed.`
-              : "Using local preview while backend integration is completed.",
-          variant: "destructive",
-        })
-      }
+    if (!currentOrg?.id) {
+      throw new Error("Select an organization before uploading an image.")
     }
 
-    const previewUrl = await fileToDataUrl(payload.imageFile)
+    const upload = await uploadImage({
+      orgId: currentOrg.id,
+      file: payload.imageFile,
+      folder: `orgs/${currentOrg.id}/tasks`,
+      entityId,
+    })
+
     return {
-      imageUrl: previewUrl,
-      imageKey: payload.imageKey,
+      imageUrl: upload.url,
+      imageKey: upload.key,
     }
   }
 
@@ -415,16 +425,14 @@ export default function TasksPage() {
     setIsFormSubmitting(true)
     try {
       const image = await resolveTaskImage(payload)
-      const createdTask = createTask({
+      const createdTask = await createTask({
         title: payload.title,
         description: payload.description,
         status: payload.status,
         priority: payload.priority,
         type: payload.type,
         assigneeId: payload.assigneeId,
-        assigneeName: payload.assigneeName,
-        assigneeAvatarUrl: payload.assigneeAvatarUrl,
-        orgId: currentOrg?.id || "org-1",
+        orgId: currentOrg?.id,
         eventId: payload.eventId ?? currentEvent?.id ?? null,
         relatedIncidentId: payload.relatedIncidentId,
         relatedWorkOrderId: payload.relatedWorkOrderId,
@@ -437,7 +445,7 @@ export default function TasksPage() {
 
       toast({
         title: "Task created",
-        description: `${createdTask.title} was added to local mock data.`,
+        description: `${createdTask.title} created successfully.`,
       })
       return true
     } catch (error) {
@@ -458,15 +466,13 @@ export default function TasksPage() {
     setIsFormSubmitting(true)
     try {
       const image = await resolveTaskImage(payload, editingTask.id)
-      updateTask(editingTask.id, {
+      await updateTask(editingTask.id, {
         title: payload.title,
         description: payload.description,
         status: payload.status,
         priority: payload.priority,
         type: payload.type,
         assigneeId: payload.assigneeId,
-        assigneeName: payload.assigneeName,
-        assigneeAvatarUrl: payload.assigneeAvatarUrl,
         eventId: payload.eventId ?? null,
         relatedIncidentId: payload.relatedIncidentId,
         relatedWorkOrderId: payload.relatedWorkOrderId,
@@ -479,7 +485,7 @@ export default function TasksPage() {
 
       toast({
         title: "Task updated",
-        description: `${payload.title} was updated in local mock data.`,
+        description: `${payload.title} updated successfully.`,
       })
 
       setEditingTask(null)
@@ -663,12 +669,24 @@ export default function TasksPage() {
                 size="sm"
                 onClick={() => setIsCreateOpen(true)}
                 className="h-8 px-3 text-sm"
+                disabled={!currentOrg}
               >
                 <Plus className="h-3.5 w-3.5" />
                 New Task
               </Button>
             </div>
           </div>
+
+          {isLoading && tasks.length === 0 ? (
+            <div className="mb-3 rounded-md border border-[#2A2E3A] bg-[#131722] px-3 py-2 text-xs text-gray-300">
+              Loading tasks...
+            </div>
+          ) : null}
+          {errorMessage ? (
+            <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {errorMessage}
+            </div>
+          ) : null}
 
           <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <DndContext

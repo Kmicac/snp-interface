@@ -28,12 +28,22 @@ interface EventOption {
   name: string
 }
 
+interface ProviderServiceOption {
+  id: string
+  label: string
+}
+
+interface ZoneOption {
+  id: string
+  name: string
+}
+
 type WorkOrderDialogMode = "create" | "edit"
 
 export interface CreateWorkOrderPayload {
   eventId: string
-  providerService: string
-  zone: string | null
+  providerServiceId: string
+  zoneId: string | null
   title: string
   description: string
   scheduledStart: string
@@ -47,8 +57,8 @@ interface CreateWorkOrderDialogProps {
   onOpenChange: (open: boolean) => void
   events: EventOption[]
   selectedEventId?: string
-  providerServices: string[]
-  zones: string[]
+  providerServices: ProviderServiceOption[]
+  zones: ZoneOption[]
   mode?: WorkOrderDialogMode
   initialValues?: Partial<CreateWorkOrderPayload>
   onCreate: (payload: CreateWorkOrderPayload) => void
@@ -57,8 +67,8 @@ interface CreateWorkOrderDialogProps {
 const createWorkOrderSchema = z
   .object({
     eventId: z.string().min(1, "Event is required"),
-    providerService: z.string().min(1, "Provider service is required"),
-    zone: z.string().nullable(),
+    providerServiceId: z.string().min(1, "Provider service is required"),
+    zoneId: z.string().nullable(),
     title: z.string().trim().min(3, "Title is required"),
     description: z.string().trim().min(5, "Description is required"),
     scheduledStart: z.string().min(1, "Scheduled start is required"),
@@ -85,8 +95,8 @@ export function CreateWorkOrderDialog({
   const defaultValues = useMemo<CreateWorkOrderPayload>(
     () => ({
       eventId: initialValues?.eventId || selectedEventId || events[0]?.id || "",
-      providerService: initialValues?.providerService || providerServices[0] || "",
-      zone: initialValues?.zone ?? null,
+      providerServiceId: initialValues?.providerServiceId || providerServices[0]?.id || "",
+      zoneId: initialValues?.zoneId ?? null,
       title: initialValues?.title || "",
       description: initialValues?.description || "",
       scheduledStart: initialValues?.scheduledStart || "",
@@ -109,8 +119,8 @@ export function CreateWorkOrderDialog({
   }, [open])
 
   const eventId = form.watch("eventId")
-  const providerService = form.watch("providerService")
-  const zoneValue = form.watch("zone")
+  const providerServiceId = form.watch("providerServiceId")
+  const zoneValue = form.watch("zoneId")
   const firstError = Object.values(form.formState.errors)[0]?.message
 
   const handleSubmit = form.handleSubmit((data) => {
@@ -155,16 +165,16 @@ export function CreateWorkOrderDialog({
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-200">Provider service</label>
               <Select
-                value={providerService}
-                onValueChange={(value) => form.setValue("providerService", value, { shouldValidate: true })}
+                value={providerServiceId}
+                onValueChange={(value) => form.setValue("providerServiceId", value, { shouldValidate: true })}
               >
                 <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
                   <SelectValue placeholder="Select provider service" />
                 </SelectTrigger>
                 <SelectContent>
                   {providerServices.map((service) => (
-                    <SelectItem key={service} value={service}>
-                      {service}
+                    <SelectItem key={service.id} value={service.id}>
+                      {service.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -175,7 +185,9 @@ export function CreateWorkOrderDialog({
               <label className="text-sm font-medium text-gray-200">Zone (optional)</label>
               <Select
                 value={zoneValue ?? "none"}
-                onValueChange={(value) => form.setValue("zone", value === "none" ? null : value, { shouldValidate: true })}
+                onValueChange={(value) =>
+                  form.setValue("zoneId", value === "none" ? null : value, { shouldValidate: true })
+                }
               >
                 <SelectTrigger className="bg-[#1A1A1F] border-[#2B2B30]">
                   <SelectValue placeholder="Select zone" />
@@ -183,8 +195,8 @@ export function CreateWorkOrderDialog({
                 <SelectContent>
                   <SelectItem value="none">No zone</SelectItem>
                   {zones.map((zone) => (
-                    <SelectItem key={zone} value={zone}>
-                      {zone}
+                    <SelectItem key={zone.id} value={zone.id}>
+                      {zone.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -263,11 +275,6 @@ export function CreateWorkOrderDialog({
           </div>
 
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
-
-          <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
-          </p>
-
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel

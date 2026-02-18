@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 export default function TopNav() {
   const { user, currentOrg, currentEvent, organizations, events, setCurrentOrg, setCurrentEvent } = useAuth()
   const pathname = usePathname()
+  const hasMultipleOrganizations = organizations.length > 1
   const avatarSrc = user?.avatarUrl?.trim() || user?.avatar?.trim() || undefined
   const avatarFallback = user?.name?.trim()?.charAt(0)?.toUpperCase() || "U"
 
@@ -62,7 +63,7 @@ export default function TopNav() {
       {/* Center - Org & Event Selectors */}
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Organization Selector */}
-        {organizations.length > 1 && (
+        {hasMultipleOrganizations ? (
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-[#1A1A1F] border border-[#2B2B30] hover:bg-[#252529] transition-colors focus:outline-none">
               <Building2 className="h-4 w-4 text-gray-400" />
@@ -88,6 +89,13 @@ export default function TopNav() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-[#1A1A1F] border border-[#2B2B30]">
+            <Building2 className="h-4 w-4 text-gray-400" />
+            <span className="text-gray-200 hidden md:inline max-w-[180px] truncate">
+              {currentOrg?.name || "No organization"}
+            </span>
+          </div>
         )}
 
         {/* Event Selector */}
@@ -104,19 +112,25 @@ export default function TopNav() {
               Current Event
             </div>
             <DropdownMenuSeparator className="bg-[#2B2B30]" />
-            {events.map((event) => (
-              <DropdownMenuItem
-                key={event.id}
-                onClick={() => setCurrentEvent(event)}
-                className="flex items-center justify-between cursor-pointer text-gray-200 focus:bg-[#252529] focus:text-white"
-              >
-                <div className="flex flex-col">
-                  <span>{event.name}</span>
-                  <span className="text-xs text-gray-500">{event.venue}</span>
-                </div>
-                {currentEvent?.id === event.id && <Check className="h-4 w-4 text-green-500" />}
-              </DropdownMenuItem>
-            ))}
+            <div className="max-h-[320px] overflow-y-auto">
+              {events.length > 0 ? (
+                events.map((event) => (
+                  <DropdownMenuItem
+                    key={event.id}
+                    onClick={() => setCurrentEvent(event)}
+                    className="flex items-center justify-between cursor-pointer text-gray-200 focus:bg-[#252529] focus:text-white"
+                  >
+                    <div className="flex flex-col">
+                      <span>{event.name}</span>
+                      <span className="text-xs text-gray-500">{event.venue}</span>
+                    </div>
+                    {currentEvent?.id === event.id && <Check className="h-4 w-4 text-green-500" />}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <div className="px-2 py-3 text-xs text-gray-500">No events available for this organization.</div>
+              )}
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

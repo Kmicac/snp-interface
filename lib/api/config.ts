@@ -1,11 +1,6 @@
-// API Configuration
-const rawApiBaseUrl =
-  process.env.NEXT_PUBLIC_CORE_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_CORE_API_BASE_URL ||
-  "http://localhost:3000"
+import { env } from "@/lib/env"
 
-export const API_BASE_URL = rawApiBaseUrl.replace(/\/+$/, "")
+export const API_BASE_URL = env.NEXT_PUBLIC_API_BASE_URL.replace(/\/+$/, "")
 
 // API Endpoints
 export const API_ENDPOINTS = {
@@ -19,7 +14,18 @@ export const API_ENDPOINTS = {
   // Events
   events: (orgId: string) => `/orgs/${orgId}/events`,
   event: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}`,
+  eventResources: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/resources`,
   eventZones: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/zones`,
+
+  // Tasks
+  tasks: (orgId: string) => `/orgs/${orgId}/tasks`,
+  task: (orgId: string, taskId: string) => `/orgs/${orgId}/tasks/${taskId}`,
+  taskMove: (orgId: string, taskId: string) => `/orgs/${orgId}/tasks/${taskId}/move`,
+  taskComments: (orgId: string, taskId: string) => `/orgs/${orgId}/tasks/${taskId}/comments`,
+  taskActivity: (orgId: string, taskId: string) => `/orgs/${orgId}/tasks/${taskId}/activity`,
+  taskChecklist: (orgId: string, taskId: string) => `/orgs/${orgId}/tasks/${taskId}/checklist`,
+  taskChecklistItem: (orgId: string, taskId: string, itemId: string) =>
+    `/orgs/${orgId}/tasks/${taskId}/checklist/${itemId}`,
 
   // Providers & Services
   providers: (orgId: string) => `/orgs/${orgId}/providers`,
@@ -80,5 +86,5 @@ export const API_ENDPOINTS = {
   kpisSlaBreaches: (orgId: string, eventId: string) => `/orgs/${orgId}/events/${eventId}/kpis/sla-breaches`,
 
   // Files
-  filesUpload: '/files/upload',
+  filesUpload: (orgId: string) => `/orgs/${orgId}/files/upload`,
 }

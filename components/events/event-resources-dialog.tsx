@@ -15,18 +15,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
-import type { Asset, Staff } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+interface StaffOption {
+  id: string
+  name: string
+  email?: string | null
+}
+
+interface AssetOption {
+  id: string
+  name: string
+  categoryName?: string | null
+  location?: string | null
+}
 
 interface EventResourcesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   eventName?: string
-  staffOptions: Staff[]
-  assetOptions: Asset[]
+  staffOptions: StaffOption[]
+  assetOptions: AssetOption[]
   initialStaffIds?: string[]
   initialAssetIds?: string[]
-  onSave: (payload: { staffIds: string[]; assetIds: string[] }) => void
+  onSave: (payload: { staffIds: string[]; assetIds: string[] }) => Promise<boolean | void> | boolean | void
+  isSubmitting?: boolean
 }
 
 export function EventResourcesDialog({
@@ -38,6 +51,7 @@ export function EventResourcesDialog({
   initialStaffIds = [],
   initialAssetIds = [],
   onSave,
+  isSubmitting = false,
 }: EventResourcesDialogProps) {
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
@@ -58,7 +72,7 @@ export function EventResourcesDialog({
       staffOptions.filter((staff) => {
         const query = staffQuery.toLowerCase().trim()
         if (!query) return true
-        return `${staff.name} ${staff.email} ${staff.roles.join(" ")}`.toLowerCase().includes(query)
+        return `${staff.name} ${staff.email ?? ""}`.toLowerCase().includes(query)
       }),
     [staffOptions, staffQuery]
   )
@@ -68,7 +82,7 @@ export function EventResourcesDialog({
       assetOptions.filter((asset) => {
         const query = assetQuery.toLowerCase().trim()
         if (!query) return true
-        return `${asset.name} ${asset.category} ${asset.location}`.toLowerCase().includes(query)
+        return `${asset.name} ${asset.categoryName ?? ""} ${asset.location ?? ""}`.toLowerCase().includes(query)
       }),
     [assetOptions, assetQuery]
   )
@@ -85,12 +99,14 @@ export function EventResourcesDialog({
     )
   }
 
-  const handleSave = () => {
-    onSave({
+  const handleSave = async () => {
+    const success = await onSave({
       staffIds: selectedStaffIds,
       assetIds: selectedAssetIds,
     })
-    onOpenChange(false)
+    if (success !== false) {
+      onOpenChange(false)
+    }
   }
 
   return (
@@ -146,7 +162,7 @@ export function EventResourcesDialog({
                       />
                       <span className="min-w-0">
                         <span className="block truncate text-sm text-gray-100">{staff.name}</span>
-                        <span className="block truncate text-xs text-gray-400">{staff.roles.join(", ")}</span>
+                        <span className="block truncate text-xs text-gray-400">{staff.email || "Sin email"}</span>
                       </span>
                     </label>
                   )
@@ -203,7 +219,7 @@ export function EventResourcesDialog({
                       <span className="min-w-0">
                         <span className="block truncate text-sm text-gray-100">{asset.name}</span>
                         <span className="block truncate text-xs text-gray-400">
-                          {asset.category} - {asset.location}
+                          {asset.categoryName || "Sin categoría"} - {asset.location || "Sin ubicación"}
                         </span>
                       </span>
                     </label>
@@ -224,8 +240,8 @@ export function EventResourcesDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleSave}>
-            Save assignments
+          <Button type="button" onClick={() => void handleSave()} disabled={isSubmitting}>
+            {isSubmitting ? "Saving..." : "Save assignments"}
           </Button>
         </DialogFooter>
       </DialogContent>

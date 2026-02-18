@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/lib/context/auth-context"
+import { subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory } from "@/lib/inventory/permissions"
 import type { InventoryDashboardStats, InventoryMovement } from "@/lib/inventory/types"
 import { getInventoryDashboardStats, listMovements } from "@/lib/inventory/utils"
@@ -35,6 +37,8 @@ export default function InventoryDashboardPage() {
   const [stats, setStats] = useState<InventoryDashboardStats>(EMPTY_STATS)
   const [recentMovements, setRecentMovements] = useState<InventoryMovement[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
 
   const hasAccess = canAccessInventory(user, currentOrg?.id)
 
@@ -46,6 +50,7 @@ export default function InventoryDashboardPage() {
       }
 
       setIsLoading(true)
+      setErrorMessage(null)
 
       try {
         const dashboard = await getInventoryDashboardStats(currentOrg.id)
@@ -62,16 +67,36 @@ export default function InventoryDashboardPage() {
           ...EMPTY_STATS,
           ...dashboard,
         })
-      } catch {
+      } catch (error) {
         setStats(EMPTY_STATS)
         setRecentMovements([])
+        setErrorMessage(error instanceof Error ? error.message : "No fue posible cargar el dashboard de inventario.")
       } finally {
         setIsLoading(false)
       }
     }
 
     void run()
-  }, [currentOrg?.id, hasAccess])
+  }, [currentOrg?.id, hasAccess, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.movements(currentOrg.id),
+      queryKeys.assets(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+      queryKeys.events(currentOrg.id),
+      ["event"],
+      ["eventResources"],
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentOrg?.id])
 
   const categorySummary = useMemo(() => stats.byCategory ?? stats.categories ?? [], [stats.byCategory, stats.categories])
   const totalUnits = Number.isFinite(stats.totalUnits) && stats.totalUnits ? stats.totalUnits : stats.totalAssets
@@ -98,6 +123,10 @@ export default function InventoryDashboardPage() {
         <h1 className="text-2xl font-bold text-white">Panel de Inventario</h1>
         <p className="text-sm text-gray-400">Visibilidad general del estado de equipos, categorias y movimientos recientes.</p>
       </div>
+
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{errorMessage}</div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card className="border-[#1F1F23] bg-[#0F0F12] text-white">
@@ -210,17 +239,23 @@ export default function InventoryDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentMovements.map((movement) => (
-                    <tr key={movement.id} className="border-b border-[#1F1F23] text-gray-300">
-                      <td className="px-2 py-2">{new Date(movement.createdAt).toLocaleString("es-CL")}</td>
-                      <td className="px-2 py-2">
-                        <Badge className="border-[#2B2B30] bg-[#171A22] text-gray-200">{movement.type}</Badge>
-                      </td>
-                      <td className="px-2 py-2 text-white">{movement.assetName || movement.assetId}</td>
-                      <td className="px-2 py-2">{movement.eventName || movement.eventId || "-"}</td>
-                      <td className="px-2 py-2">{movement.quantity}</td>
-                    </tr>
-                  ))}
+                  {recentMovements.map((movement, index) => {
+                    const rowKey =
+                      movement.id?.trim() ||
+                      `${movement.createdAt}-${movement.assetId}-${movement.type || movement.movementType}-${index}`
+
+                    return (
+                      <tr key={rowKey} className="border-b border-[#1F1F23] text-gray-300">
+                        <td className="px-2 py-2">{new Date(movement.createdAt).toLocaleString("es-CL")}</td>
+                        <td className="px-2 py-2">
+                          <Badge className="border-[#2B2B30] bg-[#171A22] text-gray-200">{movement.type}</Badge>
+                        </td>
+                        <td className="px-2 py-2 text-white">{movement.assetName || movement.assetId}</td>
+                        <td className="px-2 py-2">{movement.eventName || movement.eventId || "-"}</td>
+                        <td className="px-2 py-2">{movement.quantity}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -228,7 +263,7 @@ export default function InventoryDashboardPage() {
         </CardContent>
       </Card>
 
-      {!isLoading && !hasAnyData ? (
+      {!isLoading && !errorMessage && !hasAnyData ? (
         <div className="rounded-lg border border-[#2B2B30] bg-[#11141d] p-4 text-sm text-gray-400">No hay datos de inventario aun.</div>
       ) : null}
     </div>

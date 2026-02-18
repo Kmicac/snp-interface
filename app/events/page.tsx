@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
 
@@ -8,12 +8,16 @@ import Layout from "@/components/kokonutui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { EventCard } from "@/components/events/event-card"
-import type { Event } from "@/lib/types"
-import { useAuth } from "@/lib/context/auth-context"
-import { useToast } from "@/hooks/use-toast"
-import { mockAssets, mockEvents, mockStaff } from "@/lib/mock-data"
 import { CreateEventDialog, type CreateEventPayload } from "@/components/events/create-event-dialog"
 import { EventResourcesDialog } from "@/components/events/event-resources-dialog"
+import { apiClient } from "@/lib/api/client"
+import { API_ENDPOINTS } from "@/lib/api/config"
+import { uploadImage } from "@/lib/api/upload-image"
+import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
+import { useToast } from "@/hooks/use-toast"
+import type { Event } from "@/lib/types"
 
 type EventListItem = Event & {
   workOrdersCount: number
@@ -23,206 +27,336 @@ type EventListItem = Event & {
   assetsAssignedCount: number
 }
 
-type EventAssignmentsState = Record<
-  string,
-  {
-    staffIds: string[]
-    assetIds: string[]
-  }
->
-
-const eventMetricsById: Record<string, Pick<EventListItem, "workOrdersCount" | "incidentsCount" | "sponsorsCount">> = {
-  "evt-1": { workOrdersCount: 45, incidentsCount: 0, sponsorsCount: 12 },
-  "evt-2": { workOrdersCount: 28, incidentsCount: 0, sponsorsCount: 8 },
-  "evt-3": { workOrdersCount: 52, incidentsCount: 3, sponsorsCount: 15 },
-  "evt-4": { workOrdersCount: 20, incidentsCount: 1, sponsorsCount: 5 },
+interface EventApiResponse {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  startDate: string | null
+  endDate: string | null
+  venue: string | null
+  status: Event["status"]
+  imageUrl: string | null
+  imageKey: string | null
+  workOrdersCount: number
+  incidentsCount: number
+  sponsorsCount: number
+  staffAssignedCount: number
+  assetsAssignedCount: number
 }
 
-const initialEventAssignments: EventAssignmentsState = {
-  "evt-1": { staffIds: ["st-1", "st-2", "st-4"], assetIds: ["as-1", "as-3", "as-5"] },
-  "evt-2": { staffIds: ["st-2", "st-3"], assetIds: ["as-1", "as-4"] },
-  "evt-3": { staffIds: ["st-1", "st-3", "st-5"], assetIds: ["as-2", "as-3", "as-5"] },
-  "evt-4": { staffIds: ["st-5"], assetIds: ["as-4"] },
+interface EventResourcesResponse {
+  staffIds: string[]
+  assetIds: string[]
 }
 
-function resolveEventStatus(startDate: string, endDate: string): Event["status"] {
-  const now = new Date()
-  const start = new Date(startDate)
-  const end = new Date(endDate)
+interface StaffOptionResponse {
+  id: string
+  fullName: string
+  email?: string | null
+}
 
-  if (now >= start && now <= end) {
-    return "live"
+interface AssetOptionResponse {
+  id: string
+  name: string
+  categoryId?: string | null
+  location?: string | null
+}
+
+function mapEvent(source: EventApiResponse): EventListItem {
+  const startDate = source.startDate ?? ""
+  const endDate = source.endDate ?? source.startDate ?? ""
+
+  return {
+    id: source.id,
+    code: source.code,
+    name: source.name,
+    description: source.description ?? undefined,
+    startDate,
+    endDate,
+    venue: source.venue ?? "Venue not set",
+    status: source.status,
+    imageUrl: source.imageUrl ?? undefined,
+    imageKey: source.imageKey ?? undefined,
+    workOrdersCount: source.workOrdersCount,
+    incidentsCount: source.incidentsCount,
+    sponsorsCount: source.sponsorsCount,
+    staffAssignedCount: source.staffAssignedCount,
+    assetsAssignedCount: source.assetsAssignedCount,
   }
-
-  return now < start ? "upcoming" : "past"
 }
 
 function toDateTimeInput(value: string): string {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
     2,
     "0"
   )}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
-const initialEvents: EventListItem[] = mockEvents.map((event) => ({
-  ...event,
-  status: resolveEventStatus(event.startDate, event.endDate),
-  workOrdersCount: eventMetricsById[event.id]?.workOrdersCount ?? 0,
-  incidentsCount: eventMetricsById[event.id]?.incidentsCount ?? 0,
-  sponsorsCount: eventMetricsById[event.id]?.sponsorsCount ?? 0,
-  staffAssignedCount: initialEventAssignments[event.id]?.staffIds.length ?? 0,
-  assetsAssignedCount: initialEventAssignments[event.id]?.assetIds.length ?? 0,
-}))
-
 export default function EventsPage() {
   const router = useRouter()
   const { currentOrg } = useAuth()
   const { toast } = useToast()
-  const canEdit = true
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [events, setEvents] = useState<EventListItem[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<EventListItem | null>(null)
   const [assigningEvent, setAssigningEvent] = useState<EventListItem | null>(null)
-  const [events, setEvents] = useState<EventListItem[]>(initialEvents)
-  const [eventAssignments, setEventAssignments] = useState<EventAssignmentsState>(initialEventAssignments)
-  const previewUrlsRef = useRef<string[]>([])
+  const [isSavingEvent, setIsSavingEvent] = useState(false)
+  const [isSavingResources, setIsSavingResources] = useState(false)
+  const [staffOptions, setStaffOptions] = useState<Array<{ id: string; name: string; email?: string | null }>>([])
+  const [assetOptions, setAssetOptions] = useState<Array<{ id: string; name: string; categoryName?: string | null; location?: string | null }>>([])
+  const [resourceSelection, setResourceSelection] = useState<{ staffIds: string[]; assetIds: string[] }>({
+    staffIds: [],
+    assetIds: [],
+  })
+
+  const loadEvents = useCallback(async () => {
+    if (!currentOrg?.id) {
+      setEvents([])
+      setErrorMessage(null)
+      return
+    }
+
+    setIsLoading(true)
+    setErrorMessage(null)
+    try {
+      const response = await apiClient.get<EventApiResponse[]>(API_ENDPOINTS.events(currentOrg.id))
+      setEvents(response.map(mapEvent))
+    } catch (error) {
+      setEvents([])
+      const message = error instanceof Error ? error.message : "No fue posible cargar eventos."
+      setErrorMessage(message)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentOrg?.id])
+
+  const loadResourceOptions = useCallback(async () => {
+    if (!currentOrg?.id) {
+      setStaffOptions([])
+      setAssetOptions([])
+      return
+    }
+
+    try {
+      const [staffResponse, assetsResponse] = await Promise.all([
+        apiClient.get<StaffOptionResponse[]>(API_ENDPOINTS.staff(currentOrg.id)),
+        apiClient.get<AssetOptionResponse[]>(API_ENDPOINTS.assets(currentOrg.id)),
+      ])
+
+      setStaffOptions(
+        staffResponse.map((staff) => ({
+          id: staff.id,
+          name: staff.fullName,
+          email: staff.email ?? null,
+        }))
+      )
+
+      setAssetOptions(
+        assetsResponse.map((asset) => ({
+          id: asset.id,
+          name: asset.name,
+          categoryName: asset.categoryId ?? null,
+          location: asset.location ?? null,
+        }))
+      )
+    } catch {
+      setStaffOptions([])
+      setAssetOptions([])
+    }
+  }, [currentOrg?.id])
 
   useEffect(() => {
-    return () => {
-      previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    void loadEvents()
+    void loadResourceOptions()
+  }, [loadEvents, loadResourceOptions])
+
+  useEffect(() => {
+    if (!assigningEvent || !currentOrg?.id) {
+      setResourceSelection({ staffIds: [], assetIds: [] })
+      return
     }
-  }, [])
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await apiClient.get<EventResourcesResponse>(
+          API_ENDPOINTS.eventResources(currentOrg.id, assigningEvent.id)
+        )
+        if (!cancelled) {
+          setResourceSelection({
+            staffIds: response.staffIds ?? [],
+            assetIds: response.assetIds ?? [],
+          })
+        }
+      } catch {
+        if (!cancelled) {
+          setResourceSelection({ staffIds: [], assetIds: [] })
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [assigningEvent, currentOrg?.id])
 
   const upcomingEvents = useMemo(
-    () => events.filter((event) => event.status === "upcoming" || event.status === "live"),
+    () => events.filter((event) => event.status === "PLANNED" || event.status === "IN_PROGRESS"),
     [events]
   )
 
-  const pastEvents = useMemo(() => events.filter((event) => event.status === "past"), [events])
+  const pastEvents = useMemo(() => events.filter((event) => event.status === "COMPLETED"), [events])
 
-  const handleCreateEvent = (payload: CreateEventPayload) => {
-    console.log("Create Event payload", { ...payload, imageFile: payload.imageFile })
+  const handleCreateEvent = async (payload: CreateEventPayload) => {
+    if (!currentOrg?.id) return false
 
-    const createdAt = Date.now()
-    const imageSource = payload.imageFile ? URL.createObjectURL(payload.imageFile) : payload.imageUrl
-    if (payload.imageFile && imageSource) {
-      previewUrlsRef.current.push(imageSource)
+    setIsSavingEvent(true)
+    try {
+      let imageUrl = payload.imageUrl
+      let imageKey = payload.imageKey
+
+      if (payload.imageFile) {
+        const upload = await uploadImage({
+          orgId: currentOrg.id,
+          file: payload.imageFile,
+          folder: `orgs/${currentOrg.id}/events`,
+          entityId: payload.code,
+        })
+        imageUrl = upload.url
+        imageKey = upload.key
+      }
+
+      await apiClient.post<EventApiResponse>(API_ENDPOINTS.events(currentOrg.id), {
+        code: payload.code,
+        name: payload.name,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        venue: payload.venue,
+        imageUrl,
+        imageKey,
+      })
+
+      invalidateQueryKeys(queryKeys.events(currentOrg.id))
+      await loadEvents()
+      toast({
+        title: "Event created",
+        description: `${payload.name} created successfully.`,
+      })
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Could not create event.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsSavingEvent(false)
     }
-
-    const nextEvent: EventListItem = {
-      id: `evt-${createdAt}`,
-      name: payload.name,
-      code: payload.code,
-      startDate: payload.startDate,
-      endDate: payload.endDate,
-      venue: payload.venue,
-      status: resolveEventStatus(payload.startDate, payload.endDate),
-      imageUrl: imageSource ?? undefined,
-      imageKey: payload.imageFile
-        ? `events/mock-${createdAt}-${payload.imageFile.name}`
-        : (payload.imageKey ?? undefined),
-      workOrdersCount: 0,
-      incidentsCount: 0,
-      sponsorsCount: 0,
-      staffAssignedCount: 0,
-      assetsAssignedCount: 0,
-    }
-
-    setEvents((prev) => [nextEvent, ...prev])
-    setEventAssignments((prev) => ({
-      ...prev,
-      [nextEvent.id]: {
-        staffIds: [],
-        assetIds: [],
-      },
-    }))
-
-    toast({
-      title: "Event created",
-      description: `${payload.name} was added to local mock data.`,
-    })
   }
 
-  const handleEditEvent = (payload: CreateEventPayload) => {
-    if (!editingEvent) return
+  const handleEditEvent = async (payload: CreateEventPayload) => {
+    if (!editingEvent || !currentOrg?.id) return false
 
-    console.log("Update Event payload", {
-      ...payload,
-      imageFile: payload.imageFile,
-      clearedImage: Boolean(payload.clearedImage),
-    })
+    setIsSavingEvent(true)
+    try {
+      let imageUrl: string | null | undefined = payload.imageUrl
+      let imageKey: string | null | undefined = payload.imageKey
 
-    const updatedAt = Date.now()
-    let imageSource = payload.imageUrl
+      if (payload.clearedImage) {
+        imageUrl = null
+        imageKey = null
+      }
 
-    if (payload.imageFile) {
-      imageSource = URL.createObjectURL(payload.imageFile)
-      previewUrlsRef.current.push(imageSource)
-    }
+      if (payload.imageFile) {
+        const upload = await uploadImage({
+          orgId: currentOrg.id,
+          file: payload.imageFile,
+          folder: `orgs/${currentOrg.id}/events`,
+          entityId: editingEvent.id,
+        })
+        imageUrl = upload.url
+        imageKey = upload.key
+      }
 
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.id === editingEvent.id
-          ? {
-              ...event,
-              name: payload.name,
-              startDate: payload.startDate,
-              endDate: payload.endDate,
-              venue: payload.venue,
-              status: resolveEventStatus(payload.startDate, payload.endDate),
-              imageUrl: payload.clearedImage ? undefined : (imageSource ?? undefined),
-              imageKey: payload.clearedImage
-                ? undefined
-                : payload.imageFile
-                  ? `events/mock-${updatedAt}-${payload.imageFile.name}`
-                  : (payload.imageKey ?? event.imageKey),
-            }
-          : event
+      await apiClient.patch<EventApiResponse>(API_ENDPOINTS.event(currentOrg.id, editingEvent.id), {
+        name: payload.name,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        venue: payload.venue,
+        imageUrl,
+        imageKey,
+      })
+
+      invalidateQueryKeys(
+        queryKeys.events(currentOrg.id),
+        queryKeys.event(currentOrg.id, editingEvent.id),
       )
-    )
-
-    setEditingEvent(null)
-    toast({
-      title: "Event updated",
-      description: `${payload.name} was updated in local mock data.`,
-    })
+      setEditingEvent(null)
+      await loadEvents()
+      toast({
+        title: "Event updated",
+        description: `${payload.name} updated successfully.`,
+      })
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Could not update event.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsSavingEvent(false)
+    }
   }
 
-  const handleSaveEventAssignments = (payload: { staffIds: string[]; assetIds: string[] }) => {
-    if (!assigningEvent) return
+  const handleSaveEventAssignments = async (payload: { staffIds: string[]; assetIds: string[] }) => {
+    if (!assigningEvent || !currentOrg?.id) return false
 
-    console.log("Update Event resource assignments", {
-      eventId: assigningEvent.id,
-      staffIds: payload.staffIds,
-      assetIds: payload.assetIds,
-    })
-
-    setEventAssignments((prev) => ({
-      ...prev,
-      [assigningEvent.id]: {
-        staffIds: payload.staffIds,
-        assetIds: payload.assetIds,
-      },
-    }))
-
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.id === assigningEvent.id
-          ? {
-              ...event,
-              staffAssignedCount: payload.staffIds.length,
-              assetsAssignedCount: payload.assetIds.length,
-            }
-          : event
+    setIsSavingResources(true)
+    try {
+      await apiClient.put<EventResourcesResponse>(
+        API_ENDPOINTS.eventResources(currentOrg.id, assigningEvent.id),
+        {
+          staffIds: payload.staffIds,
+          assetIds: payload.assetIds,
+        }
       )
-    )
 
-    toast({
-      title: "Resources assigned",
-      description: `${payload.staffIds.length} staff and ${payload.assetIds.length} assets assigned to ${assigningEvent.name}.`,
-    })
+      invalidateQueryKeys(
+        queryKeys.events(currentOrg.id),
+        queryKeys.event(currentOrg.id, assigningEvent.id),
+        queryKeys.eventResources(assigningEvent.id),
+        queryKeys.zones(assigningEvent.id),
+        queryKeys.assignments(assigningEvent.id),
+        queryKeys.assets(currentOrg.id),
+        queryKeys.staffMembers(currentOrg.id),
+      )
+      await loadEvents()
+      toast({
+        title: "Resources assigned",
+        description: `${payload.staffIds.length} staff and ${payload.assetIds.length} assets assigned to ${assigningEvent.name}.`,
+      })
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Could not update event resources.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsSavingResources(false)
+    }
   }
 
   return (
@@ -241,6 +375,13 @@ export default function EventsPage() {
             Create Event
           </Button>
         </div>
+
+        {isLoading ? (
+          <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4 text-sm text-gray-300">Loading events...</div>
+        ) : null}
+        {errorMessage ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{errorMessage}</div>
+        ) : null}
 
         <Tabs defaultValue="upcoming" className="w-full">
           <TabsList className="border border-[#2B2B30] bg-[#1A1A1F]">
@@ -264,7 +405,7 @@ export default function EventsPage() {
                 <EventCard
                   key={event.id}
                   event={event}
-                  canEdit={canEdit}
+                  canEdit
                   onOpen={() => router.push(`/events/${event.id}`)}
                   onEdit={() => setEditingEvent(event)}
                   onManageAssignments={() => setAssigningEvent(event)}
@@ -282,7 +423,7 @@ export default function EventsPage() {
                 <EventCard
                   key={event.id}
                   event={event}
-                  canEdit={canEdit}
+                  canEdit
                   onOpen={() => router.push(`/events/${event.id}`)}
                   onEdit={() => setEditingEvent(event)}
                   onManageAssignments={() => setAssigningEvent(event)}
@@ -299,8 +440,10 @@ export default function EventsPage() {
         onOpenChange={setCreateOpen}
         organizationId={currentOrg?.id}
         organizationName={currentOrg?.name}
+        isSubmitting={isSavingEvent}
         onCreate={handleCreateEvent}
       />
+
       <CreateEventDialog
         open={editingEvent !== null}
         onOpenChange={(open) => {
@@ -323,6 +466,7 @@ export default function EventsPage() {
               }
             : undefined
         }
+        isSubmitting={isSavingEvent}
         onCreate={handleEditEvent}
       />
 
@@ -332,10 +476,11 @@ export default function EventsPage() {
           if (!open) setAssigningEvent(null)
         }}
         eventName={assigningEvent?.name}
-        staffOptions={mockStaff}
-        assetOptions={mockAssets}
-        initialStaffIds={assigningEvent ? eventAssignments[assigningEvent.id]?.staffIds ?? [] : []}
-        initialAssetIds={assigningEvent ? eventAssignments[assigningEvent.id]?.assetIds ?? [] : []}
+        staffOptions={staffOptions}
+        assetOptions={assetOptions}
+        initialStaffIds={resourceSelection.staffIds}
+        initialAssetIds={resourceSelection.assetIds}
+        isSubmitting={isSavingResources}
         onSave={handleSaveEventAssignments}
       />
     </Layout>

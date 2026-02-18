@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Package, Plus, QrCode, Search, SquarePen, Trash2 } from "lucide-react"
 
 import { AssetFormDialog } from "@/components/inventory/asset-form-dialog"
@@ -14,104 +14,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
 import { uploadImage } from "@/lib/api/upload-image"
 import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory, canWriteInventory } from "@/lib/inventory/permissions"
 import type { Asset, AssetCategory, AssetQrResponse, CreateAssetDto, UpdateAssetDto } from "@/lib/inventory/types"
 import { assetStatusClassName, assetStatusLabel, createAsset, deleteAsset, getAssetQr, listAssetCategories, listAssets, updateAsset } from "@/lib/inventory/utils"
 
 const ASSET_IMAGE_PLACEHOLDER =
   "https://images.unsplash.com/photo-1586864387967-d02ef85d93e8?auto=format&fit=crop&w=300&q=80"
-
-const MOCK_ASSET_CATEGORIES: AssetCategory[] = [
-  { id: "cat-competition", name: "Competition Equipment" },
-  { id: "cat-electronics", name: "Electronics" },
-  { id: "cat-medical", name: "Medical" },
-  { id: "cat-security", name: "Security" },
-  { id: "cat-broadcast", name: "Broadcast" },
-]
-
-const mockCategoryById = new Map(MOCK_ASSET_CATEGORIES.map((item) => [item.id, item]))
-
-const MOCK_ASSETS: Asset[] = [
-  {
-    id: "mock-as-1",
-    name: "Tatami Mat Set Pro",
-    categoryId: "cat-competition",
-    assetTag: "TTM-001",
-    serialNumber: "SN-TTM-001",
-    quantity: 12,
-    status: "IN_STORAGE",
-    condition: "GOOD",
-    location: "Bodega A1",
-    imageUrl: "https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=300&q=80",
-  },
-  {
-    id: "mock-as-2",
-    name: "LED Scoreboard 55\"",
-    categoryId: "cat-electronics",
-    assetTag: "SCR-208",
-    serialNumber: "SN-SCR-208",
-    quantity: 2,
-    status: "IN_USE",
-    condition: "GOOD",
-    location: "Main Arena",
-    imageUrl: "https://images.unsplash.com/photo-1593642702821-c8da6771f0c6?auto=format&fit=crop&w=300&q=80",
-  },
-  {
-    id: "mock-as-3",
-    name: "First Aid Backpack",
-    categoryId: "cat-medical",
-    assetTag: "MED-014",
-    serialNumber: "SN-MED-014",
-    quantity: 6,
-    status: "IN_STORAGE",
-    condition: "NEW",
-    location: "Medical Station",
-    imageUrl: "https://images.unsplash.com/photo-1584362917165-526a968579e8?auto=format&fit=crop&w=300&q=80",
-  },
-  {
-    id: "mock-as-4",
-    name: "Security Barrier Fence",
-    categoryId: "cat-security",
-    assetTag: "SEC-030",
-    serialNumber: "SN-SEC-030",
-    quantity: 14,
-    status: "UNDER_REPAIR",
-    condition: "FAIR",
-    location: "Maintenance",
-    imageUrl: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=300&q=80",
-  },
-  {
-    id: "mock-as-5",
-    name: "Wireless Mic Kit",
-    categoryId: "cat-broadcast",
-    assetTag: "AUD-777",
-    serialNumber: "SN-AUD-777",
-    quantity: 4,
-    status: "DAMAGED",
-    condition: "POOR",
-    location: "Audio Cabin",
-    imageUrl: "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=300&q=80",
-  },
-  {
-    id: "mock-as-6",
-    name: "Camera Tripod Pro",
-    categoryId: "cat-broadcast",
-    assetTag: "CAM-112",
-    serialNumber: "SN-CAM-112",
-    quantity: 5,
-    status: "IN_STORAGE",
-    condition: "GOOD",
-    location: "Bodega B2",
-    imageUrl: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=300&q=80",
-  },
-].map(
-  (asset): Asset => ({
-    ...asset,
-    status: asset.status as Asset["status"],
-    condition: asset.condition as Asset["condition"],
-    category: asset.categoryId ? mockCategoryById.get(asset.categoryId) || null : null,
-  })
-)
 
 export default function InventoryAssetsPage() {
   const { user, currentOrg } = useAuth()
@@ -121,7 +31,6 @@ export default function InventoryAssetsPage() {
   const [categories, setCategories] = useState<AssetCategory[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [usingMockData, setUsingMockData] = useState(false)
 
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
@@ -135,27 +44,26 @@ export default function InventoryAssetsPage() {
   const [qrData, setQrData] = useState<AssetQrResponse | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
   const [isQrLoading, setIsQrLoading] = useState(false)
-  const hasShownMockToastRef = useRef(false)
+  const [reloadTick, setReloadTick] = useState(0)
 
   const hasAccess = canAccessInventory(user, currentOrg?.id)
   const canWrite = canWriteInventory(user, currentOrg?.id)
-
-  const applyMockAssetsPreview = useCallback(() => {
-    setCategories(MOCK_ASSET_CATEGORIES)
-    setAssets(MOCK_ASSETS)
-    setUsingMockData(true)
-  }, [])
 
   const loadCategories = useCallback(async () => {
     if (!currentOrg?.id) return
 
     try {
       const response = await listAssetCategories(currentOrg.id)
-      setCategories(response.length > 0 ? response : MOCK_ASSET_CATEGORIES)
-    } catch {
-      setCategories(MOCK_ASSET_CATEGORIES)
+      setCategories(response)
+    } catch (err) {
+      setCategories([])
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "No fue posible cargar categorías.",
+        variant: "destructive",
+      })
     }
-  }, [currentOrg?.id])
+  }, [currentOrg?.id, toast])
 
   const loadAssets = useCallback(async () => {
     if (!currentOrg?.id || !hasAccess) {
@@ -170,34 +78,18 @@ export default function InventoryAssetsPage() {
         categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
         status: statusFilter !== "all" ? (statusFilter as Asset["status"]) : undefined,
       })
-
-      if (response.length > 0) {
-        setAssets(response)
-        setUsingMockData(false)
-        hasShownMockToastRef.current = false
-      } else {
-        applyMockAssetsPreview()
-        if (!hasShownMockToastRef.current) {
-          toast({
-            title: "Vista demo de assets",
-            description: "Mostrando datos mock mientras se integra el backend.",
-          })
-          hasShownMockToastRef.current = true
-        }
-      }
-    } catch {
-      applyMockAssetsPreview()
-      if (!hasShownMockToastRef.current) {
-        toast({
-          title: "Vista demo de assets",
-          description: "Mostrando datos mock mientras se integra el backend.",
-        })
-        hasShownMockToastRef.current = true
-      }
+      setAssets(response)
+    } catch (err) {
+      setAssets([])
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "No fue posible cargar assets.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
-  }, [applyMockAssetsPreview, categoryFilter, currentOrg?.id, hasAccess, statusFilter, toast])
+  }, [categoryFilter, currentOrg?.id, hasAccess, statusFilter, toast])
 
   useEffect(() => {
     void loadCategories()
@@ -205,7 +97,26 @@ export default function InventoryAssetsPage() {
 
   useEffect(() => {
     void loadAssets()
-  }, [loadAssets])
+  }, [loadAssets, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.assets(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.movements(currentOrg.id),
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+      queryKeys.events(currentOrg.id),
+      ["event"],
+      ["eventResources"],
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentOrg?.id])
 
   const filteredAssets = useMemo(() => {
     const byCategory =
@@ -245,8 +156,9 @@ export default function InventoryAssetsPage() {
       if (imageFile) {
         try {
           const upload = await uploadImage({
+            orgId: currentOrg.id,
             file: imageFile,
-            folder: "assets",
+            folder: `orgs/${currentOrg.id}/assets`,
             entityId: assetId,
           })
           imageUrl = upload.url
@@ -277,7 +189,6 @@ export default function InventoryAssetsPage() {
           ...payload,
           name: normalizedName,
           quantity: payload.quantity ?? 1,
-          status: payload.status ?? "IN_STORAGE",
           condition: payload.condition ?? "GOOD",
           imageUrl,
           imageKey,
@@ -285,6 +196,13 @@ export default function InventoryAssetsPage() {
         toast({ title: "Asset creado", description: "El asset fue agregado a inventario." })
       }
 
+      invalidateQueryKeys(
+        queryKeys.assets(currentOrg.id),
+        queryKeys.kits(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id),
+        queryKeys.checklists(currentOrg.id),
+      )
       await loadAssets()
       return true
     } catch (err) {
@@ -307,6 +225,13 @@ export default function InventoryAssetsPage() {
       await deleteAsset(currentOrg.id, deletingAsset.id)
       toast({ title: "Asset eliminado", description: "El asset fue eliminado correctamente." })
       setDeletingAsset(null)
+      invalidateQueryKeys(
+        queryKeys.assets(currentOrg.id),
+        queryKeys.kits(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id),
+        queryKeys.checklists(currentOrg.id),
+      )
       await loadAssets()
     } catch (err) {
       toast({
@@ -330,12 +255,9 @@ export default function InventoryAssetsPage() {
     try {
       const response = await getAssetQr(currentOrg.id, asset.id)
       setQrData(response)
-    } catch {
-      setQrData({
-        assetId: asset.id,
-        qrData: `ASSET:${asset.id}`,
-      })
-      setQrError(null)
+    } catch (err) {
+      setQrData(null)
+      setQrError(err instanceof Error ? err.message : "No fue posible generar el QR.")
     } finally {
       setIsQrLoading(false)
     }
@@ -359,7 +281,6 @@ export default function InventoryAssetsPage() {
           </h1>
           <p className="mt-1 text-sm text-gray-400">
             {filteredAssets.length} assets listados - {totalQuantity} unidades totales
-            {usingMockData ? " · Vista demo" : ""}
           </p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} disabled={!canWrite}>

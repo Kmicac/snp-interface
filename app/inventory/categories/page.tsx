@@ -8,22 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory, canWriteInventory } from "@/lib/inventory/permissions"
 import type { Asset, AssetCategory } from "@/lib/inventory/types"
-import { listAssetCategories, listAssets } from "@/lib/inventory/utils"
-
-const FALLBACK_CATEGORIES: AssetCategory[] = [
-  { id: "cat-competition-equipment", name: "Competition Equipment" },
-  { id: "cat-electronics", name: "Electronics" },
-  { id: "cat-medical", name: "Medical" },
-  { id: "cat-security", name: "Security" },
-  { id: "cat-broadcast", name: "Broadcast" },
-  { id: "cat-lighting", name: "Lighting" },
-  { id: "cat-logistics", name: "Logistics" },
-  { id: "cat-hospitality", name: "Hospitality" },
-  { id: "cat-staff-uniforms", name: "Staff Uniforms" },
-  { id: "cat-it-networking", name: "IT & Networking" },
-]
+import { createAssetCategory, listAssetCategories, listAssets } from "@/lib/inventory/utils"
 
 type CategorySummary = AssetCategory & {
   assetCount: number
@@ -34,9 +23,11 @@ export default function CategoriesPage() {
   const { toast } = useToast()
   const { user, currentOrg } = useAuth()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [categories, setCategories] = useState<AssetCategory[]>(FALLBACK_CATEGORIES)
+  const [categories, setCategories] = useState<AssetCategory[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
+  const [reloadTick, setReloadTick] = useState(0)
 
   const hasAccess = canAccessInventory(user, currentOrg?.id)
   const canWrite = canWriteInventory(user, currentOrg?.id)
@@ -54,19 +45,39 @@ export default function CategoriesPage() {
         listAssets(currentOrg.id),
       ])
 
-      setCategories(categoriesResponse.length > 0 ? categoriesResponse : FALLBACK_CATEGORIES)
+      setCategories(categoriesResponse)
       setAssets(assetsResponse)
-    } catch {
-      setCategories(FALLBACK_CATEGORIES)
+    } catch (error) {
+      setCategories([])
       setAssets([])
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible cargar categorias.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
-  }, [currentOrg?.id, hasAccess])
+  }, [currentOrg?.id, hasAccess, toast])
 
   useEffect(() => {
     void loadCategoryData()
-  }, [loadCategoryData])
+  }, [loadCategoryData, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.assets(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentOrg?.id])
 
   const summaryByCategory = useMemo<CategorySummary[]>(
     () =>
@@ -89,18 +100,33 @@ export default function CategoriesPage() {
     [assets, categories]
   )
 
-  const handleCreateCategory = (payload: CreateAssetCategoryPayload) => {
-    const nextCategory: AssetCategory = {
-      id: `cat-${Date.now()}`,
-      name: payload.name,
-      description: payload.description,
-    }
+  const handleCreateCategory = async (payload: CreateAssetCategoryPayload) => {
+    if (!currentOrg?.id) return false
 
-    setCategories((prev) => [nextCategory, ...prev])
-    toast({
-      title: "Categoria agregada",
-      description: `${payload.name} se agrego en modo demo.`,
-    })
+    setIsCreating(true)
+    try {
+      await createAssetCategory(currentOrg.id, payload)
+      invalidateQueryKeys(
+        queryKeys.assets(currentOrg.id),
+        queryKeys.kits(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id),
+      )
+      await loadCategoryData()
+      toast({
+        title: "Categoria agregada",
+        description: `${payload.name} se agrego correctamente.`,
+      })
+      return true
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No fue posible crear la categoria.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsCreating(false)
+    }
   }
 
   if (!currentOrg) {
@@ -127,7 +153,7 @@ export default function CategoriesPage() {
             <FolderTree className="h-6 w-6" />
             Asset Categories
           </h1>
-          <p className="mt-1 text-sm text-gray-400">Categorias y cantidades visibles en modo demo para Inventario.</p>
+          <p className="mt-1 text-sm text-gray-400">Categorias y cantidades del inventario real.</p>
         </div>
         <Button onClick={() => setIsDialogOpen(true)} disabled={!canWrite}>
           <Plus className="mr-2 h-4 w-4" />
@@ -173,6 +199,7 @@ export default function CategoriesPage() {
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
         onCreate={handleCreateCategory}
+        isSubmitting={isCreating}
       />
     </div>
   )

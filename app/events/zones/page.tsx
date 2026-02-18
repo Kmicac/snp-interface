@@ -1,75 +1,157 @@
 "use client"
 
+import { useEffect, useState } from "react"
+import { ClipboardList, LayoutGrid } from "lucide-react"
+
 import Layout from "@/components/kokonutui/layout"
 import { Badge } from "@/components/ui/badge"
-import { LayoutGrid, Users2, ClipboardList } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { useAuth } from "@/lib/context/auth-context"
+import { apiClient } from "@/lib/api/client"
+import { API_ENDPOINTS } from "@/lib/api/config"
+import { subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 
-// Mock zones data
-const mockZones = [
-  { id: "z-1", name: "TATAMI 1", type: "Competition", capacity: 200, staffCount: 8, workOrdersCount: 12 },
-  { id: "z-2", name: "TATAMI 2", type: "Competition", capacity: 200, staffCount: 6, workOrdersCount: 10 },
-  { id: "z-3", name: "TATAMI 3", type: "Competition", capacity: 200, staffCount: 6, workOrdersCount: 8 },
-  { id: "z-4", name: "WARM-UP", type: "Athletes", capacity: 100, staffCount: 2, workOrdersCount: 4 },
-  { id: "z-5", name: "MEDICAL", type: "Support", capacity: 20, staffCount: 4, workOrdersCount: 3 },
-  { id: "z-6", name: "VIP", type: "Hospitality", capacity: 50, staffCount: 3, workOrdersCount: 5 },
-  { id: "z-7", name: "ENTRANCE", type: "Access", capacity: null, staffCount: 8, workOrdersCount: 6 },
-  { id: "z-8", name: "BACKSTAGE", type: "Operations", capacity: 30, staffCount: 5, workOrdersCount: 7 },
-  { id: "z-9", name: "SPONSORS AREA", type: "Partners", capacity: 40, staffCount: 2, workOrdersCount: 4 },
-]
+interface ZoneResponse {
+  id: string
+  name: string
+  type?: string | null
+}
+
+type ZonesApiEnvelope =
+  | ZoneResponse[]
+  | {
+      zones?: ZoneResponse[]
+      items?: ZoneResponse[]
+      data?: ZoneResponse[]
+    }
+
+function normalizeZonesResponse(payload: ZonesApiEnvelope): ZoneResponse[] {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload.zones)) return payload.zones
+  if (Array.isArray(payload.items)) return payload.items
+  if (Array.isArray(payload.data)) return payload.data
+  return []
+}
 
 export default function ZonesPage() {
-  const getTypeColor = (type: string) => {
-    const colors: Record<string, string> = {
-      Competition: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-      Athletes: "bg-green-500/20 text-green-400 border-green-500/30",
-      Support: "bg-red-500/20 text-red-400 border-red-500/30",
-      Hospitality: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-      Access: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-      Operations: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-      Partners: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+  const { currentOrg, currentEvent } = useAuth()
+  const [zones, setZones] = useState<ZoneResponse[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
+
+  useEffect(() => {
+    if (!currentOrg?.id || !currentEvent?.id) {
+      setZones([])
+      setErrorMessage(null)
+      return
     }
-    return colors[type] || "bg-gray-500/20 text-gray-400 border-gray-500/30"
-  }
+
+    let cancelled = false
+    setIsLoading(true)
+    setErrorMessage(null)
+
+    void (async () => {
+      try {
+        const response = await apiClient.get<ZonesApiEnvelope>(
+          API_ENDPOINTS.eventZones(currentOrg.id, currentEvent.id)
+        )
+        if (!cancelled) {
+          setZones(normalizeZonesResponse(response))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setZones([])
+          setErrorMessage(error instanceof Error ? error.message : "Could not load zones.")
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentEvent?.id, currentOrg?.id, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id || !currentEvent?.id) return
+
+    const keys = [
+      queryKeys.events(currentOrg.id),
+      queryKeys.event(currentOrg.id, currentEvent.id),
+      queryKeys.zones(currentEvent.id),
+      queryKeys.eventResources(currentEvent.id),
+      queryKeys.workOrders(currentEvent.id),
+      queryKeys.tasks(currentOrg.id),
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentEvent?.id, currentOrg?.id])
 
   return (
     <Layout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <LayoutGrid className="w-6 h-6" />
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+            <LayoutGrid className="h-6 w-6" />
             Zones & Layout
           </h1>
-          <p className="text-gray-500 mt-1">Event zones and their current status</p>
+          <p className="mt-1 text-gray-500">Event zones loaded from backend data</p>
+          <p className="mt-1 text-xs text-gray-600">
+            {currentOrg?.name ? `Organization: ${currentOrg.name}` : "Organization: not selected"}{" "}
+            {currentEvent?.name ? `| Event: ${currentEvent.name}` : "| Event: not selected"}
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {mockZones.map((zone) => (
+        {!currentOrg || !currentEvent ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
+            Select an organization and event to view zones.
+          </div>
+        ) : null}
+
+        {isLoading ? (
+          <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4 text-sm text-gray-300">Loading zones...</div>
+        ) : null}
+
+        {errorMessage ? (
+          <div className="space-y-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+            <p>{errorMessage}</p>
+            <Button size="sm" variant="outline" onClick={() => setReloadTick((value) => value + 1)}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {zones.map((zone) => (
             <div
               key={zone.id}
-              className="bg-[#0F0F12] rounded-xl p-6 border border-[#1F1F23] hover:border-[#2B2B30] transition-colors"
+              className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-6 transition-colors hover:border-[#2B2B30]"
             >
-              <div className="flex items-start justify-between mb-4">
+              <div className="mb-4 flex items-start justify-between">
                 <h3 className="text-lg font-semibold text-white">{zone.name}</h3>
-                <Badge className={getTypeColor(zone.type)}>{zone.type}</Badge>
+                <Badge className="border-[#2B2B30] bg-[#171A22] text-gray-200">{zone.type || "General"}</Badge>
               </div>
 
-              {zone.capacity && (
-                <p className="text-sm text-gray-500 mb-4">Capacity: {zone.capacity}</p>
-              )}
-
-              <div className="flex items-center gap-4 pt-4 border-t border-[#1F1F23]">
-                <div className="flex items-center gap-2 text-sm">
-                  <Users2 className="w-4 h-4 text-blue-400" />
-                  <span className="text-gray-300">{zone.staffCount} staff</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <ClipboardList className="w-4 h-4 text-green-400" />
-                  <span className="text-gray-300">{zone.workOrdersCount} WOs</span>
-                </div>
+              <div className="flex items-center gap-2 border-t border-[#1F1F23] pt-4 text-sm">
+                <ClipboardList className="h-4 w-4 text-green-400" />
+                <span className="text-gray-300">Zone ID: {zone.id}</span>
               </div>
             </div>
           ))}
         </div>
+
+        {!isLoading && !errorMessage && zones.length === 0 && currentOrg && currentEvent ? (
+          <div className="rounded-xl border border-dashed border-[#2A2C33] bg-[#13151A] p-4 text-sm text-gray-400">
+            No zones configured for this event. Create zones from backend or select another event with zones.
+          </div>
+        ) : null}
       </div>
     </Layout>
   )

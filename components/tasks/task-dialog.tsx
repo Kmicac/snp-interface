@@ -23,6 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  ACCEPTED_IMAGE_INPUT_VALUE,
+  ALLOWED_IMAGE_MIME_TYPES,
+  getAttachmentMediaKind,
+  isAllowedImageMimeType,
+  MAX_UPLOAD_SIZE_BYTES,
+} from "@/lib/media/attachments"
 import type { TaskPriority, TaskStatus, TaskType } from "@/lib/types"
 
 interface EventOption {
@@ -42,7 +49,7 @@ export interface TaskDialogValues {
   status: TaskStatus
   priority: TaskPriority
   type: TaskType
-  assigneeId?: string
+  assigneeId?: string | null
   assigneeName?: string
   assigneeAvatarUrl?: string
   eventId?: string | null
@@ -147,6 +154,7 @@ export function TaskDialog({
 
   const existingImageUrl = clearCurrentImage ? null : (initialValues?.imageUrl ?? null)
   const imagePreview = attachmentPreviewUrl ?? existingImageUrl
+  const previewMediaKind = getAttachmentMediaKind(imagePreview)
 
   const handleAttachmentSelection = (file: File | null) => {
     if (!file) {
@@ -155,13 +163,12 @@ export function TaskDialog({
       return
     }
 
-    if (!file.type.startsWith("image/")) {
-      setAttachmentError("Only image files are allowed.")
+    if (!isAllowedImageMimeType(file.type)) {
+      setAttachmentError(`Only ${ALLOWED_IMAGE_MIME_TYPES.join(", ")} are allowed.`)
       return
     }
 
-    const maxSizeBytes = 5 * 1024 * 1024
-    if (file.size > maxSizeBytes) {
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
       setAttachmentError("Image must be 5MB or smaller.")
       return
     }
@@ -181,7 +188,7 @@ export function TaskDialog({
       status: data.status,
       priority: data.priority,
       type: data.type,
-      assigneeId: selectedAssignee?.id,
+      assigneeId: data.assigneeId === null ? null : selectedAssignee?.id,
       assigneeName: selectedAssignee?.name,
       assigneeAvatarUrl: selectedAssignee?.avatarUrl,
       eventId: data.eventId || null,
@@ -233,27 +240,37 @@ export function TaskDialog({
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-200">Image (optional)</label>
+              <label className="text-sm font-medium text-gray-200">Media attachment (optional)</label>
               <div className="rounded-lg border border-[#2B2B30] bg-[#1A1A1F] p-3">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-2">
                     <Input
                       type="file"
-                      accept="image/*"
+                      accept={ACCEPTED_IMAGE_INPUT_VALUE}
                       onChange={(event) => handleAttachmentSelection(event.target.files?.[0] ?? null)}
                       className="border-[#2B2B30] bg-[#171A22] text-sm file:mr-3 file:rounded file:border-0 file:bg-[#2A3040] file:px-3 file:py-1 file:text-xs file:text-gray-200"
                     />
-                    <p className="text-xs text-gray-500">Accepted: image/* up to 5MB.</p>
+                    <p className="text-xs text-gray-500">
+                      Accepted upload: JPEG, PNG, WEBP up to 5MB. Task detail supports image or video URLs.
+                    </p>
                     {attachmentError ? <p className="text-xs text-red-400">{attachmentError}</p> : null}
                   </div>
 
                   {imagePreview ? (
                     <div className="space-y-2">
-                      <img
-                        src={imagePreview}
-                        alt="Task attachment preview"
-                        className="h-24 w-40 rounded-md border border-[#2B2B30] object-cover"
-                      />
+                      {previewMediaKind === "video" ? (
+                        <video
+                          src={imagePreview}
+                          controls
+                          className="h-24 w-40 rounded-md border border-[#2B2B30] bg-black object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={imagePreview}
+                          alt="Task attachment preview"
+                          className="h-24 w-40 rounded-md border border-[#2B2B30] object-cover"
+                        />
+                      )}
                       <Button
                         type="button"
                         variant="outline"
@@ -423,10 +440,6 @@ export function TaskDialog({
           </div>
 
           {firstError ? <p className="text-xs text-red-400">{String(firstError)}</p> : null}
-
-          <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will call the real SNP backend.
-          </p>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>

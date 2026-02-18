@@ -6,6 +6,11 @@ import { ImageIcon, UploadCloud, X } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  ACCEPTED_IMAGE_INPUT_VALUE,
+  ALLOWED_IMAGE_MIME_TYPES,
+  isAllowedImageMimeType,
+} from "@/lib/media/attachments"
 import { cn } from "@/lib/utils"
 
 export type ImageUploadProps = {
@@ -66,8 +71,8 @@ export function ImageUpload({
       return
     }
 
-    if (!file.type.startsWith("image/")) {
-      setError("Only image files are allowed.")
+    if (!isAllowedImageMimeType(file.type)) {
+      setError(`Only ${ALLOWED_IMAGE_MIME_TYPES.join(", ")} are allowed.`)
       return
     }
 
@@ -117,7 +122,7 @@ export function ImageUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={ACCEPTED_IMAGE_INPUT_VALUE}
         className="sr-only"
         onChange={handleInputChange}
         disabled={disabled}
@@ -158,7 +163,9 @@ export function ImageUpload({
         >
           <UploadCloud className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">Drop an image here, or click to upload</p>
-          <p className="text-xs text-muted-foreground">Accepted: image/* up to {maxSizeMB}MB</p>
+          <p className="text-xs text-muted-foreground">
+            Accepted: JPEG, PNG, WEBP up to {maxSizeMB}MB
+          </p>
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-card/60 p-3">

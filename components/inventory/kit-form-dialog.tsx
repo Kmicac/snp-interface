@@ -47,7 +47,7 @@ export function KitFormDialog({ open, onOpenChange, assets, mode = "create", ini
       initialValues?.items?.length
         ? initialValues.items.map((item, index) => ({
             id: `${item.assetId}-${index}`,
-            assetId: item.assetId,
+            assetId: item.assetId ?? "",
             quantity: item.quantity || 1,
           }))
         : [{ id: `row-${Date.now()}`, assetId: "", quantity: 1 }]
@@ -79,6 +79,8 @@ export function KitFormDialog({ open, onOpenChange, assets, mode = "create", ini
       .filter((item) => item.assetId)
       .map((item) => ({
         assetId: item.assetId,
+        categoryId: assetById.get(item.assetId)?.categoryId ?? undefined,
+        name: assetById.get(item.assetId)?.name || "Inventory item",
         quantity: Math.max(1, Number(item.quantity) || 1),
       }))
 

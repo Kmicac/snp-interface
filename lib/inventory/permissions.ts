@@ -1,12 +1,19 @@
-import type { User } from '@/lib/types'
+import type { OrgRole, User } from '@/lib/types'
 
-const WRITER_ROLES = new Set(['admin', 'owner', 'manager'])
-const READER_ROLES = new Set(['admin', 'owner', 'manager', 'member', 'viewer'])
+const WRITER_ROLES = new Set<OrgRole>(["SUPER_ADMIN", "EVENT_DIRECTOR", "TECH_SYSTEMS", "GUADA"])
+const READER_ROLES = new Set<OrgRole>([
+  "SUPER_ADMIN",
+  "HR",
+  "EVENT_DIRECTOR",
+  "HEAD_REFEREE",
+  "TECH_SYSTEMS",
+  "GUADA",
+])
 
-function getOrgRole(user: User | null | undefined, orgId?: string | null): string | null {
+function getOrgRole(user: User | null | undefined, orgId?: string | null): OrgRole | null {
   if (!user || !orgId) return null
   const membership = user.memberships.find((item) => item.orgId === orgId)
-  return membership?.role?.toLowerCase() || null
+  return membership?.role ?? null
 }
 
 export function canAccessInventory(user: User | null | undefined, orgId?: string | null): boolean {

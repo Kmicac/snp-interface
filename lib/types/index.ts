@@ -1,4 +1,12 @@
 // Auth Types
+export type OrgRole =
+  | "SUPER_ADMIN"
+  | "HR"
+  | "EVENT_DIRECTOR"
+  | "HEAD_REFEREE"
+  | "TECH_SYSTEMS"
+  | "GUADA"
+
 export interface User {
   id: string
   email: string
@@ -11,12 +19,11 @@ export interface User {
 export interface Membership {
   orgId: string
   orgName: string
-  role: string
+  role: OrgRole
 }
 
 export interface LoginResponse {
-  token: string
-  user: User
+  accessToken: string
 }
 
 // Organization Types
@@ -35,7 +42,7 @@ export interface Event {
   startDate: string
   endDate: string
   venue: string
-  status: 'upcoming' | 'live' | 'past'
+  status: "PLANNED" | "IN_PROGRESS" | "COMPLETED"
   description?: string
   imageUrl?: string
   imageKey?: string
@@ -311,6 +318,7 @@ export interface Task {
   relatedIncidentId?: string
   relatedSponsorshipId?: string
   relatedLabel?: string
+  position?: number
   imageUrl?: string
   imageKey?: string
   createdAt: string

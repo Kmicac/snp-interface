@@ -42,9 +42,9 @@ function formatEventDateRange(startDate: string, endDate: string) {
 
 function getStatusBadge(status: Event["status"]) {
   switch (status) {
-    case "live":
+    case "IN_PROGRESS":
       return <Badge className="border-green-500/30 bg-green-500/20 text-green-300">IN_PROGRESS</Badge>
-    case "past":
+    case "COMPLETED":
       return <Badge className="border-slate-500/30 bg-slate-500/20 text-slate-300">COMPLETED</Badge>
     default:
       return <Badge className="border-blue-500/30 bg-blue-500/20 text-blue-300">PLANNED</Badge>
@@ -73,7 +73,7 @@ function getCityLabel(venue: string) {
 
 export function EventCard({ event, canEdit = false, onOpen, onEdit, onManageAssignments }: EventCardProps) {
   const eventTypeBadge = getEventTypeBadge(event)
-  const cityLabel = getCityLabel(event.venue)
+  const cityLabel = getCityLabel(event.venue || "Venue not set")
 
   return (
     <Card

@@ -23,6 +23,12 @@ import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
 import { uploadImage } from "@/lib/api/upload-image"
 import { useTasksBoard } from "@/lib/context/tasks-board-context"
+import {
+  ACCEPTED_IMAGE_INPUT_VALUE,
+  ALLOWED_IMAGE_MIME_TYPES,
+  getAttachmentMediaKind,
+  isAllowedImageMimeType,
+} from "@/lib/media/attachments"
 import type { Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -86,6 +92,7 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
   const [commentImagePreviewUrl, setCommentImagePreviewUrl] = useState<string | null>(null)
 
   const checklist = task?.checklist ?? []
+  const taskAttachmentKind = getAttachmentMediaKind(task?.imageUrl)
   const comments = useMemo(
     () =>
       [...(task?.comments ?? [])].sort(
@@ -109,10 +116,18 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
     }
   }, [open])
 
-  const handleAddChecklistItem = () => {
+  const handleAddChecklistItem = async () => {
     if (!task || !newChecklistText.trim()) return
-    addChecklistItem(task.id, newChecklistText)
-    setNewChecklistText("")
+    try {
+      await addChecklistItem(task.id, newChecklistText)
+      setNewChecklistText("")
+    } catch (error) {
+      toast({
+        title: "Could not add checklist item",
+        description: error instanceof Error ? error.message : "Try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleAddComment = async () => {
@@ -132,32 +147,20 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
     try {
       let imageUrl: string | undefined
       if (newCommentImageFile) {
-        if (currentOrg?.id) {
-          try {
-            const upload = await uploadImage({
-              file: newCommentImageFile,
-              folder: `orgs/${currentOrg.id}/tasks/comments`,
-              entityId: task.id,
-            })
-            imageUrl = upload.url
-          } catch (error) {
-            toast({
-              title: "Attachment fallback",
-              description:
-                error instanceof Error
-                  ? `${error.message}. Using local preview while backend integration is completed.`
-                  : "Using local preview while backend integration is completed.",
-              variant: "destructive",
-            })
-          }
+        if (!currentOrg?.id) {
+          throw new Error("Select an organization before uploading an image.")
         }
 
-        if (!imageUrl) {
-          imageUrl = await fileToDataUrl(newCommentImageFile)
-        }
+        const upload = await uploadImage({
+          orgId: currentOrg.id,
+          file: newCommentImageFile,
+          folder: `orgs/${currentOrg.id}/tasks/comments`,
+          entityId: task.id,
+        })
+        imageUrl = upload.url
       }
 
-      addComment(
+      await addComment(
         task.id,
         trimmedComment || "Shared an image",
         {
@@ -186,10 +189,10 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
     const file = event.target.files?.[0]
     if (!file) return
 
-    if (!file.type.startsWith("image/")) {
+    if (!isAllowedImageMimeType(file.type)) {
       toast({
         title: "Invalid file type",
-        description: "Please select an image file.",
+        description: `Allowed formats: ${ALLOWED_IMAGE_MIME_TYPES.join(", ")}`,
         variant: "destructive",
       })
       event.target.value = ""
@@ -244,13 +247,24 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
                       onClick={() => setImagePreviewOpen(true)}
                       className="w-full overflow-hidden rounded-md border border-[#2A2E3A] bg-[#171C2A] p-1 text-left transition hover:border-[#3E4658]"
                     >
-                      <img
-                        src={task.imageUrl}
-                        alt={`${task.title} attachment`}
-                        className="h-40 w-full rounded object-cover"
-                      />
+                      {taskAttachmentKind === "video" ? (
+                        <video
+                          src={task.imageUrl}
+                          className="h-40 w-full rounded bg-black object-cover"
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <img
+                          src={task.imageUrl}
+                          alt={`${task.title} attachment`}
+                          className="h-40 w-full rounded object-cover"
+                        />
+                      )}
                     </button>
-                    <p className="text-xs text-gray-500">Click image to preview.</p>
+                    <p className="text-xs text-gray-500">
+                      Click to preview {taskAttachmentKind === "video" ? "video" : "image"}.
+                    </p>
                   </section>
                 ) : null}
 
@@ -281,7 +295,15 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
                         >
                           <Checkbox
                             checked={item.done}
-                            onCheckedChange={() => toggleChecklistItem(task.id, item.id)}
+                            onCheckedChange={() => {
+                              void toggleChecklistItem(task.id, item.id).catch((error) => {
+                                toast({
+                                  title: "Could not update checklist item",
+                                  description: error instanceof Error ? error.message : "Try again.",
+                                  variant: "destructive",
+                                })
+                              })
+                            }}
                             className="border-[#3A4254] data-[state=checked]:bg-[#5A6A84]"
                           />
                           <span className={cn("text-sm text-gray-200", item.done && "text-gray-400 line-through")}>
@@ -302,7 +324,7 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault()
-                        handleAddChecklistItem()
+                        void handleAddChecklistItem()
                       }
                     }}
                     placeholder="Add checklist item and press Enter"
@@ -348,11 +370,20 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
                               onClick={() => setCommentImagePreviewUrl(comment.imageUrl ?? null)}
                               className="mt-2 block w-full overflow-hidden rounded-md border border-[#2A2E3A] bg-[#111626] p-1 text-left transition hover:border-[#3E4658]"
                             >
-                              <img
-                                src={comment.imageUrl}
-                                alt="Comment attachment"
-                                className="max-h-48 w-full rounded object-cover"
-                              />
+                              {getAttachmentMediaKind(comment.imageUrl) === "video" ? (
+                                <video
+                                  src={comment.imageUrl}
+                                  className="max-h-48 w-full rounded bg-black object-cover"
+                                  muted
+                                  playsInline
+                                />
+                              ) : (
+                                <img
+                                  src={comment.imageUrl}
+                                  alt="Comment attachment"
+                                  className="max-h-48 w-full rounded object-cover"
+                                />
+                              )}
                             </button>
                           ) : null}
                         </div>
@@ -376,7 +407,7 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
                     <input
                       ref={commentImageInputRef}
                       type="file"
-                      accept="image/*"
+                      accept={ACCEPTED_IMAGE_INPUT_VALUE}
                       className="hidden"
                       onChange={handleCommentImageSelect}
                     />
@@ -441,16 +472,24 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
             <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
               <DialogContent className="border-[#1F1F23] bg-[#0B0D12] text-white sm:max-w-4xl">
                 <DialogHeader>
-                  <DialogTitle>Task image</DialogTitle>
+                  <DialogTitle>Task attachment</DialogTitle>
                   <DialogDescription className="text-gray-400">{task.title}</DialogDescription>
                 </DialogHeader>
                 <div className="overflow-hidden rounded-lg border border-[#2A2E3A] bg-black/50 p-2">
                   {task.imageUrl ? (
-                    <img
-                      src={task.imageUrl}
-                      alt={`${task.title} full preview`}
-                      className="max-h-[70vh] w-full rounded object-contain"
-                    />
+                    taskAttachmentKind === "video" ? (
+                      <video
+                        src={task.imageUrl}
+                        controls
+                        className="max-h-[70vh] w-full rounded bg-black object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={task.imageUrl}
+                        alt={`${task.title} full preview`}
+                        className="max-h-[70vh] w-full rounded object-contain"
+                      />
+                    )
                   ) : null}
                 </div>
                 <DialogFooter>
@@ -464,16 +503,24 @@ export function TaskDetailsDialog({ task, open, onOpenChange, onEditTask }: Task
             <Dialog open={Boolean(commentImagePreviewUrl)} onOpenChange={(nextOpen) => !nextOpen && setCommentImagePreviewUrl(null)}>
               <DialogContent className="border-[#1F1F23] bg-[#0B0D12] text-white sm:max-w-4xl">
                 <DialogHeader>
-                  <DialogTitle>Comment image</DialogTitle>
+                  <DialogTitle>Comment attachment</DialogTitle>
                   <DialogDescription className="text-gray-400">{task.title}</DialogDescription>
                 </DialogHeader>
                 <div className="overflow-hidden rounded-lg border border-[#2A2E3A] bg-black/50 p-2">
                   {commentImagePreviewUrl ? (
-                    <img
-                      src={commentImagePreviewUrl}
-                      alt="Comment image full preview"
-                      className="max-h-[70vh] w-full rounded object-contain"
-                    />
+                    getAttachmentMediaKind(commentImagePreviewUrl) === "video" ? (
+                      <video
+                        src={commentImagePreviewUrl}
+                        controls
+                        className="max-h-[70vh] w-full rounded bg-black object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={commentImagePreviewUrl}
+                        alt="Comment image full preview"
+                        className="max-h-[70vh] w-full rounded object-contain"
+                      />
+                    )
                   ) : null}
                 </div>
                 <DialogFooter>

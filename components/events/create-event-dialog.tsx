@@ -36,7 +36,8 @@ interface CreateEventDialogProps {
   organizationName?: string
   mode?: "create" | "edit"
   initialValues?: Partial<CreateEventPayload>
-  onCreate: (payload: CreateEventPayload) => void
+  onCreate: (payload: CreateEventPayload) => Promise<boolean | void> | boolean | void
+  isSubmitting?: boolean
 }
 
 const createEventSchema = z
@@ -61,6 +62,7 @@ export function CreateEventDialog({
   mode = "create",
   initialValues,
   onCreate,
+  isSubmitting = false,
 }: CreateEventDialogProps) {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null)
@@ -98,18 +100,20 @@ export function CreateEventDialog({
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
-  const handleSubmit = form.handleSubmit((data) => {
+  const handleSubmit = form.handleSubmit(async (data) => {
     const hadInitialImage = Boolean(initialValues?.imageUrl || initialValues?.imageKey)
     const clearedImage = mode === "edit" && hadInitialImage && !existingImageUrl && !imageFile
 
-    onCreate({
+    const success = await onCreate({
       ...data,
       imageFile,
       imageUrl: existingImageUrl ?? undefined,
       imageKey: existingImageUrl ? existingImageKey ?? undefined : undefined,
       clearedImage,
     })
-    onOpenChange(false)
+    if (success !== false) {
+      onOpenChange(false)
+    }
   })
 
   return (
@@ -203,15 +207,13 @@ export function CreateEventDialog({
 
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
 
-          <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
-          </p>
-
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">{mode === "edit" ? "Save changes" : "Create Event"}</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : mode === "edit" ? "Save changes" : "Create Event"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

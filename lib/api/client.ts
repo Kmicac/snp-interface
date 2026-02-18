@@ -10,6 +10,38 @@ export class ApiError extends Error {
   }
 }
 
+let inMemoryToken: string | null = null
+
+export function setAuthToken(token: string | null) {
+  inMemoryToken = token
+}
+
+function parseErrorMessage(errorBody: unknown): string | null {
+  if (!errorBody || typeof errorBody !== 'object') return null
+
+  const payload = errorBody as Record<string, unknown>
+  const message = payload.message
+
+  if (typeof message === 'string' && message.trim()) {
+    return message
+  }
+
+  if (Array.isArray(message)) {
+    const normalized = message
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+    if (normalized.length > 0) {
+      return normalized.join(' | ')
+    }
+  }
+
+  if (typeof payload.error === 'string' && payload.error.trim()) {
+    return payload.error
+  }
+
+  return null
+}
+
 class ApiClient {
   private baseUrl: string
 
@@ -18,6 +50,7 @@ class ApiClient {
   }
 
   private getToken(): string | null {
+    if (inMemoryToken) return inMemoryToken
     if (typeof window === 'undefined') return null
     return localStorage.getItem('snp_token')
   }
@@ -70,8 +103,9 @@ class ApiClient {
       let message = `API Error: ${response.status} ${response.statusText}`
       try {
         const errorBody = await response.json()
-        if (errorBody?.message && typeof errorBody.message === 'string') {
-          message = errorBody.message
+        const parsedMessage = parseErrorMessage(errorBody)
+        if (parsedMessage) {
+          message = parsedMessage
         }
       } catch {
         // Keep default message when backend response is not JSON.
@@ -102,67 +136,90 @@ class ApiClient {
     return raw as T
   }
 
-  private async request(endpoint: string, init: RequestInit, customHeaders?: HeadersInit): Promise<Response> {
-    return fetch(`${this.baseUrl}${endpoint}`, {
-      ...init,
-      headers: this.getHeaders(init.body, customHeaders),
-    })
+  private async request(
+    endpoint: string,
+    init: RequestInit,
+    customHeaders?: HeadersInit,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const url = `${this.baseUrl}${endpoint}`
+    try {
+      return await fetch(url, {
+        ...init,
+        headers: this.getHeaders(init.body, customHeaders),
+        signal,
+      })
+    } catch (error) {
+      const isAbort =
+        (typeof DOMException !== 'undefined' &&
+          error instanceof DOMException &&
+          error.name === 'AbortError') ||
+        (error instanceof Error && error.name === 'AbortError')
+
+      if (isAbort) {
+        throw error
+      }
+
+      const details = error instanceof Error && error.message ? ` ${error.message}` : ''
+      throw new Error(`Could not reach API (${url}).${details}`)
+    }
   }
 
-  async get<T>(endpoint: string, options?: { headers?: HeadersInit }): Promise<T> {
+  async get<T>(endpoint: string, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<T> {
     const response = await this.request(endpoint, {
       method: 'GET',
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     return this.parseResponse<T>(response)
   }
 
-  async post<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit }): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<T> {
     const response = await this.request(endpoint, {
       method: 'POST',
       body: this.toBody(data),
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     return this.parseResponse<T>(response)
   }
 
-  async put<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit }): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<T> {
     const response = await this.request(endpoint, {
       method: 'PUT',
       body: this.toBody(data),
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     return this.parseResponse<T>(response)
   }
 
-  async patch<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit }): Promise<T> {
+  async patch<T>(endpoint: string, data?: unknown, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<T> {
     const response = await this.request(endpoint, {
       method: 'PATCH',
       body: this.toBody(data),
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     return this.parseResponse<T>(response)
   }
 
-  async delete<T>(endpoint: string, options?: { headers?: HeadersInit }): Promise<T> {
+  async delete<T>(endpoint: string, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<T> {
     const response = await this.request(endpoint, {
       method: 'DELETE',
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     return this.parseResponse<T>(response)
   }
 
-  async getBlob(endpoint: string, options?: { headers?: HeadersInit }): Promise<Blob> {
+  async getBlob(endpoint: string, options?: { headers?: HeadersInit; signal?: AbortSignal }): Promise<Blob> {
     const response = await this.request(endpoint, {
       method: 'GET',
-    }, options?.headers)
+    }, options?.headers, options?.signal)
 
     if (!response.ok) {
       let message = `API Error: ${response.status} ${response.statusText}`
       try {
         const errorBody = await response.json()
-        if (errorBody?.message && typeof errorBody.message === 'string') {
-          message = errorBody.message
+        const parsedMessage = parseErrorMessage(errorBody)
+        if (parsedMessage) {
+          message = parsedMessage
         }
       } catch {
         // Keep default message when backend response is not JSON.

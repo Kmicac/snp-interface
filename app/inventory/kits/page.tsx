@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory, canWriteInventory } from "@/lib/inventory/permissions"
 import type { Asset, CreateKitDto, InventoryKit, UpdateKitDto } from "@/lib/inventory/types"
 import { applyKitToEvent, createKit, deleteKit, listAssets, listKits, updateKit } from "@/lib/inventory/utils"
@@ -26,6 +28,7 @@ export default function InventoryKitsPage() {
   const [kits, setKits] = useState<InventoryKit[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -54,14 +57,16 @@ export default function InventoryKitsPage() {
     }
 
     setIsLoading(true)
+    setLoadError(null)
 
     try {
       const [kitsResponse, assetsResponse] = await Promise.all([listKits(currentOrg.id), listAssets(currentOrg.id)])
       setKits(kitsResponse)
       setAssets(assetsResponse)
-    } catch {
+    } catch (error) {
       setKits([])
       setAssets([])
+      setLoadError(error instanceof Error ? error.message : "No fue posible cargar kits.")
     } finally {
       setIsLoading(false)
     }
@@ -70,6 +75,22 @@ export default function InventoryKitsPage() {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.kits(currentOrg.id),
+      queryKeys.assets(currentOrg.id),
+      queryKeys.movements(currentOrg.id),
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      void loadData()
+    })
+  }, [currentOrg?.id, loadData])
 
   async function handleCreate(payload: CreateKitDto | UpdateKitDto) {
     if (!currentOrg?.id) return false
@@ -117,17 +138,27 @@ export default function InventoryKitsPage() {
     setIsSaving(true)
     try {
       const result = await applyKitToEvent(currentOrg.id, eventId, kitId)
-      const payload = result as Record<string, unknown> | null
-      const applied = typeof payload?.applied === "number" ? payload.applied : undefined
-      const missing = typeof payload?.missing === "number" ? payload.missing : undefined
+      const assignedCount = result.assignedCount
+      const missingCount = result.missingItems.reduce((total, item) => total + item.quantity, 0)
 
       toast({
         title: "Kit aplicado",
         description:
-          applied !== undefined || missing !== undefined
-            ? `Aplicados: ${applied ?? 0} · Faltantes: ${missing ?? 0}`
+          assignedCount > 0 || result.missingItems.length > 0
+            ? `Aplicados: ${assignedCount} · Faltantes: ${missingCount}`
             : "Se registraron movimientos para el evento seleccionado.",
       })
+
+      invalidateQueryKeys(
+        queryKeys.kits(currentOrg.id),
+        queryKeys.assets(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.checklists(currentOrg.id, eventId),
+        queryKeys.dashboard(currentOrg.id, eventId),
+        queryKeys.event(currentOrg.id, eventId),
+        queryKeys.eventResources(eventId),
+      )
+
       await loadData()
       return true
     } catch (err) {
@@ -184,6 +215,10 @@ export default function InventoryKitsPage() {
           Crear kit
         </Button>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{loadError}</div>
+      ) : null}
 
       {isLoading ? (
         <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-6 text-sm text-gray-500">Cargando kits...</div>

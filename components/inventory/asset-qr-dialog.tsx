@@ -23,11 +23,11 @@ interface AssetQrDialogProps {
 }
 
 export function AssetQrDialog({ open, onOpenChange, assetName, assetTag, assetStatus, qrData, isLoading, error }: AssetQrDialogProps) {
-  const fallbackImage = qrData?.qrData
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(qrData.qrData)}`
+  const fallbackImage = qrData?.qrContent
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(qrData.qrContent)}`
     : null
 
-  const imageUrl = qrData?.qrImageUrl || fallbackImage
+  const imageUrl = qrData?.qrImage || fallbackImage
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -62,7 +62,7 @@ export function AssetQrDialog({ open, onOpenChange, assetName, assetTag, assetSt
                   <span className="text-gray-500">Estado:</span> {assetStatus || "-"}
                 </p>
               </div>
-              <p className="w-full break-all text-xs text-gray-400">{qrData?.qrData}</p>
+              <p className="w-full break-all text-xs text-gray-400">{qrData?.qrContent}</p>
             </div>
           ) : null}
         </div>

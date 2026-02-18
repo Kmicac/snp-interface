@@ -116,7 +116,7 @@ export const mockEvents: Event[] = [
     startDate: "2025-03-15T09:00:00",
     endDate: "2025-03-16T20:00:00",
     venue: "Movistar Arena, Santiago, Chile",
-    status: "upcoming",
+    status: "PLANNED",
     description: "Regional ADCC event with top talent from across LATAM.",
     imageUrl:
       "https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1200&q=80",
@@ -129,7 +129,7 @@ export const mockEvents: Event[] = [
     startDate: "2025-04-20T08:30:00",
     endDate: "2025-04-21T19:00:00",
     venue: "Centro de Eventos, Valparaiso, Chile",
-    status: "upcoming",
+    status: "PLANNED",
     description: "Open circuit tournament focused on grassroots and academy teams.",
     imageUrl:
       "https://images.unsplash.com/photo-1547347298-4074fc3086f0?auto=format&fit=crop&w=1200&q=80",
@@ -142,7 +142,7 @@ export const mockEvents: Event[] = [
     startDate: "2024-11-10T09:00:00",
     endDate: "2024-11-11T18:00:00",
     venue: "Estadio Nacional, Santiago, Chile",
-    status: "past",
+    status: "COMPLETED",
     description: "National championship finals and federation ranking closeout.",
     imageUrl:
       "https://images.unsplash.com/photo-1599058917765-a780eda07a3e?auto=format&fit=crop&w=1200&q=80",
@@ -155,7 +155,7 @@ export const mockEvents: Event[] = [
     startDate: "2024-09-15T10:00:00",
     endDate: "2024-09-15T20:00:00",
     venue: "Gimnasio Municipal, Concepcion, Chile",
-    status: "past",
+    status: "COMPLETED",
     description: "ADCC trials with qualifying brackets across pro divisions.",
   },
   {
@@ -165,7 +165,7 @@ export const mockEvents: Event[] = [
     startDate: "2026-02-09T08:30:00",
     endDate: "2026-02-12T21:00:00",
     venue: "Arena Metropolitana, Santiago, Chile",
-    status: "live",
+    status: "IN_PROGRESS",
     description: "Active operational window used to validate live event assignments.",
     imageUrl:
       "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=1200&q=80",

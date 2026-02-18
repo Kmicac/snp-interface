@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Event } from "@/lib/types"
 import type { Asset, ChecklistType, CreateChecklistDto } from "@/lib/inventory/types"
@@ -22,67 +21,41 @@ interface CreateChecklistDialogProps {
 }
 
 function checklistTypeLabel(type: ChecklistType) {
-  if (type === "CHECKOUT") return "Carga"
+  if (type === "LOADING") return "Carga"
+  if (type === "UNLOADING") return "Descarga"
   if (type === "RETURN") return "Return"
   return type
 }
 
-export function CreateChecklistDialog({ open, onOpenChange, assets, events, defaultEventId, isSubmitting, onSubmit }: CreateChecklistDialogProps) {
+export function CreateChecklistDialog({ open, onOpenChange, assets: _assets, events, defaultEventId, isSubmitting, onSubmit }: CreateChecklistDialogProps) {
   const [eventId, setEventId] = useState(defaultEventId || "")
   const [type, setType] = useState<ChecklistType>("RETURN")
+  const [responsibleName, setResponsibleName] = useState("")
   const [notes, setNotes] = useState("")
-  const [selected, setSelected] = useState<Record<string, number>>({})
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
     setEventId(defaultEventId || events[0]?.id || "")
     setType("RETURN")
+    setResponsibleName("")
     setNotes("")
-    setSelected({})
     setError(null)
   }, [defaultEventId, events, open])
-
-  function toggleAsset(assetId: string, checked: boolean) {
-    setSelected((prev) => {
-      if (!checked) {
-        const next = { ...prev }
-        delete next[assetId]
-        return next
-      }
-
-      return {
-        ...prev,
-        [assetId]: prev[assetId] || 1,
-      }
-    })
-  }
-
-  function setAssetQty(assetId: string, value: number) {
-    setSelected((prev) => ({
-      ...prev,
-      [assetId]: Math.max(1, Number(value) || 1),
-    }))
-  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const items = Object.entries(selected).map(([assetId, expectedQty]) => ({
-      assetId,
-      expectedQty,
-    }))
-
-    if (items.length === 0) {
-      setError("Debes seleccionar al menos un asset.")
+    if (!eventId) {
+      setError("Debes seleccionar un evento.")
       return
     }
 
     const payload: CreateChecklistDto = {
-      eventId: eventId || null,
-      type,
-      notes: notes.trim() || null,
-      items,
+      eventId,
+      checklistType: type,
+      responsibleName: responsibleName.trim() || undefined,
+      notes: notes.trim() || undefined,
     }
 
     const success = await onSubmit(payload)
@@ -94,7 +67,7 @@ export function CreateChecklistDialog({ open, onOpenChange, assets, events, defa
       <DialogContent className="max-h-[94vh] overflow-y-auto border-[#1F1F23] bg-[#0F0F12] text-white sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Nuevo checklist</DialogTitle>
-          <DialogDescription>Crea un checklist para carga/return de equipos por evento.</DialogDescription>
+          <DialogDescription>Crea un checklist para carga, descarga o retorno de equipos por evento.</DialogDescription>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -106,7 +79,6 @@ export function CreateChecklistDialog({ open, onOpenChange, assets, events, defa
                   <SelectValue placeholder="Seleccionar evento" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sin evento</SelectItem>
                   {events.map((event) => (
                     <SelectItem key={event.id} value={event.id}>
                       {event.name}
@@ -123,45 +95,26 @@ export function CreateChecklistDialog({ open, onOpenChange, assets, events, defa
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="CHECKOUT">{checklistTypeLabel("CHECKOUT")}</SelectItem>
+                  <SelectItem value="LOADING">{checklistTypeLabel("LOADING")}</SelectItem>
+                  <SelectItem value="UNLOADING">{checklistTypeLabel("UNLOADING")}</SelectItem>
                   <SelectItem value="RETURN">{checklistTypeLabel("RETURN")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
+              <Label>Responsable</Label>
+              <Input value={responsibleName} onChange={(event) => setResponsibleName(event.target.value)} className="border-[#2B2B30] bg-[#171A22]" />
+            </div>
+
+            <div className="space-y-2 md:col-span-3">
               <Label>Notas</Label>
               <Input value={notes} onChange={(event) => setNotes(event.target.value)} className="border-[#2B2B30] bg-[#171A22]" />
             </div>
           </div>
-
-          <ScrollArea className="h-80 rounded-md border border-[#2B2B30] bg-[#151821] p-3">
-            <div className="space-y-2">
-              {assets.map((asset) => {
-                const checked = selected[asset.id] !== undefined
-                const qty = selected[asset.id] || 1
-                return (
-                  <div key={asset.id} className="grid grid-cols-1 items-center gap-2 rounded-md border border-[#2B2B30] bg-[#10131A] p-2 md:grid-cols-[1fr_120px_120px]">
-                    <label className="flex items-center gap-2 text-sm text-gray-200">
-                      <input type="checkbox" checked={checked} onChange={(event) => toggleAsset(asset.id, event.target.checked)} />
-                      <span>{asset.name}</span>
-                    </label>
-
-                    <p className="text-xs text-gray-400">{asset.assetTag || asset.serialNumber || asset.id}</p>
-
-                    <Input
-                      type="number"
-                      min={1}
-                      value={qty}
-                      onChange={(event) => setAssetQty(asset.id, Number(event.target.value))}
-                      disabled={!checked}
-                      className="h-8 border-[#2B2B30] bg-[#171A22]"
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </ScrollArea>
+          <p className="text-xs text-gray-500">
+            El backend construye los ítems desde los activos en uso del evento; este formulario no envía items manuales.
+          </p>
 
           {error ? <p className="text-xs text-red-400">{error}</p> : null}
 

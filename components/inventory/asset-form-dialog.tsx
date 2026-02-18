@@ -101,16 +101,16 @@ export function AssetFormDialog({
     }
 
     const payload: CreateAssetDto | UpdateAssetDto = {
-      categoryId: categoryId || null,
+      categoryId: categoryId || undefined,
       name: name.trim(),
-      assetTag: assetTag || null,
-      serialNumber: serialNumber || null,
+      assetTag: assetTag || undefined,
+      serialNumber: serialNumber || undefined,
       quantity,
       status,
       condition,
-      location: location || null,
-      notes: notes || null,
-      imageUrl: existingImageUrl || null,
+      location: location || undefined,
+      notes: notes || undefined,
+      imageUrl: existingImageUrl || undefined,
     }
 
     const success = await onSubmit(payload, imageFile)

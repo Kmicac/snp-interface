@@ -10,8 +10,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
+import { invalidateQueryKeys, subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory, canWriteInventory } from "@/lib/inventory/permissions"
-import type { Asset, CreateChecklistDto, InventoryChecklist, SignChecklistDto, VerifyChecklistItemDto } from "@/lib/inventory/types"
+import type {
+  Asset,
+  CreateChecklistDto,
+  InventoryChecklist,
+  InventoryChecklistListItem,
+  SignChecklistDto,
+  VerifyChecklistItemDto,
+} from "@/lib/inventory/types"
 import { createChecklist, deleteChecklist, exportChecklistPdf, getChecklist, listAssets, listChecklists, signChecklist, verifyChecklistItem } from "@/lib/inventory/utils"
 
 function checklistStatusClass(status: string): string {
@@ -22,7 +31,8 @@ function checklistStatusClass(status: string): string {
 }
 
 function checklistTypeLabel(type: string): string {
-  if (type === "CHECKOUT") return "Carga"
+  if (type === "LOADING") return "Carga"
+  if (type === "UNLOADING") return "Descarga"
   if (type === "RETURN") return "Return"
   return type
 }
@@ -31,15 +41,16 @@ export default function InventoryChecklistsPage() {
   const { user, currentOrg, currentEvent, events } = useAuth()
   const { toast } = useToast()
 
-  const [items, setItems] = useState<InventoryChecklist[]>([])
+  const [items, setItems] = useState<InventoryChecklistListItem[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
-  const [selectedChecklistId, setSelectedChecklistId] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<InventoryChecklist | null>(null)
-  const [checklistToDelete, setChecklistToDelete] = useState<InventoryChecklist | null>(null)
+  const [checklistToDelete, setChecklistToDelete] = useState<InventoryChecklistListItem | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [reloadTick, setReloadTick] = useState(0)
 
   const hasAccess = canAccessInventory(user, currentOrg?.id)
   const canWrite = canWriteInventory(user, currentOrg?.id)
@@ -50,8 +61,8 @@ export default function InventoryChecklistsPage() {
         items.map((item) => [
           item.id,
           {
-            verified: item.items.filter((row) => row.verified).length,
-            total: item.items.length,
+            verified: item.verifiedItems,
+            total: item.totalItems,
           },
         ])
       ),
@@ -65,14 +76,16 @@ export default function InventoryChecklistsPage() {
     }
 
     setIsLoading(true)
+    setLoadError(null)
 
     try {
       const [checklistsResponse, assetsResponse] = await Promise.all([listChecklists(currentOrg.id), listAssets(currentOrg.id)])
       setItems(checklistsResponse)
       setAssets(assetsResponse)
-    } catch {
+    } catch (error) {
       setItems([])
       setAssets([])
+      setLoadError(error instanceof Error ? error.message : "No fue posible cargar checklists.")
     } finally {
       setIsLoading(false)
     }
@@ -80,7 +93,26 @@ export default function InventoryChecklistsPage() {
 
   useEffect(() => {
     void loadData()
-  }, [loadData])
+  }, [loadData, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.checklists(currentOrg.id),
+      queryKeys.assets(currentOrg.id),
+      queryKeys.movements(currentOrg.id),
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.events(currentOrg.id),
+      ["event"],
+      ["eventResources"],
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentOrg?.id])
 
   async function handleCreate(payload: CreateChecklistDto) {
     if (!currentOrg?.id) return false
@@ -88,6 +120,13 @@ export default function InventoryChecklistsPage() {
     setIsSaving(true)
     try {
       await createChecklist(currentOrg.id, payload)
+      invalidateQueryKeys(
+        queryKeys.checklists(currentOrg.id, payload.eventId),
+        queryKeys.checklists(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id, payload.eventId),
+        queryKeys.event(currentOrg.id, payload.eventId),
+      )
       toast({ title: "Checklist creado", description: "Se creo correctamente." })
       await loadData()
       return true
@@ -109,7 +148,6 @@ export default function InventoryChecklistsPage() {
     setIsSaving(true)
     try {
       const detail = await getChecklist(currentOrg.id, checklistId)
-      setSelectedChecklistId(checklistId)
       setSelectedDetail(detail)
       setIsDetailOpen(true)
     } catch (err) {
@@ -130,6 +168,12 @@ export default function InventoryChecklistsPage() {
     try {
       const updated = await verifyChecklistItem(currentOrg.id, selectedDetail.id, payload)
       setSelectedDetail(updated)
+      invalidateQueryKeys(
+        queryKeys.checklists(currentOrg.id, selectedDetail.eventId ?? "all"),
+        queryKeys.checklists(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id, selectedDetail.eventId ?? "all"),
+      )
       await loadData()
       return true
     } catch (err) {
@@ -151,6 +195,12 @@ export default function InventoryChecklistsPage() {
     try {
       const updated = await signChecklist(currentOrg.id, selectedDetail.id, payload)
       setSelectedDetail(updated)
+      invalidateQueryKeys(
+        queryKeys.checklists(currentOrg.id, selectedDetail.eventId ?? "all"),
+        queryKeys.checklists(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id, selectedDetail.eventId ?? "all"),
+      )
       await loadData()
       toast({ title: "Checklist firmado", description: "Se firmo correctamente." })
       return true
@@ -172,10 +222,14 @@ export default function InventoryChecklistsPage() {
     setIsSaving(true)
     try {
       await deleteChecklist(currentOrg.id, checklistId)
+      invalidateQueryKeys(
+        queryKeys.checklists(currentOrg.id),
+        queryKeys.movements(currentOrg.id),
+        queryKeys.dashboard(currentOrg.id),
+      )
       toast({ title: "Checklist eliminado", description: "El checklist fue eliminado." })
       if (selectedDetail?.id === checklistId) {
         setSelectedDetail(null)
-        setSelectedChecklistId(null)
       }
       await loadData()
       return true
@@ -240,24 +294,28 @@ export default function InventoryChecklistsPage() {
         </Button>
       </div>
 
+      {loadError ? (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{loadError}</div>
+      ) : null}
+
       <div className="space-y-3">
         {isLoading ? <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4 text-sm text-gray-500">Cargando checklists...</div> : null}
 
         {!isLoading &&
           items.map((item) => {
-            const progress = progressByChecklistId.get(item.id) || { verified: 0, total: item.items.length }
+            const progress = progressByChecklistId.get(item.id) || { verified: 0, total: item.totalItems }
             return (
               <div key={item.id} className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-white">{item.id}</h3>
-                      <Badge className="border-[#2B2B30] bg-[#171A22] text-gray-200">{checklistTypeLabel(item.type)}</Badge>
+                      <h3 className="text-lg font-semibold text-white">{item.checklistNumber || item.id}</h3>
+                      <Badge className="border-[#2B2B30] bg-[#171A22] text-gray-200">{checklistTypeLabel(item.checklistType)}</Badge>
                       <Badge className={checklistStatusClass(item.status)}>{item.status}</Badge>
                     </div>
                     <p className="mt-1 text-sm text-gray-400">{item.eventName || item.eventId || "Sin evento"}</p>
                     <p className="text-xs text-gray-500">
-                      Progreso: {progress.verified}/{progress.total} · Responsable: {item.signedBy || "-"}
+                      Progreso: {progress.verified}/{progress.total} · Responsable: {item.responsibleName || item.signedBy || "-"}
                     </p>
                   </div>
 
@@ -300,11 +358,10 @@ export default function InventoryChecklistsPage() {
         onOpenChange={(open) => {
           setIsDetailOpen(open)
           if (!open) {
-            setSelectedChecklistId(null)
             setSelectedDetail(null)
           }
         }}
-        checklist={selectedDetail || items.find((item) => item.id === selectedChecklistId) || null}
+        checklist={selectedDetail}
         isSubmitting={isSaving}
         onVerifyItem={handleVerifyItem}
         onSign={handleSign}

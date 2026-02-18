@@ -12,22 +12,23 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/context/auth-context"
+import { subscribeInvalidation } from "@/lib/data/query-invalidation"
+import { queryKeys } from "@/lib/data/query-keys"
 import { canAccessInventory } from "@/lib/inventory/permissions"
 import type { Asset, InventoryMovement } from "@/lib/inventory/types"
 import { cn } from "@/lib/utils"
 import { exportMovementsReport, listAssets, listMovements } from "@/lib/inventory/utils"
 
-const MOVEMENT_TYPES = ["CHECKOUT", "RETURN", "TRANSFER", "ADJUSTMENT", "KIT_APPLIED"]
+const MOVEMENT_TYPES = ["CHECK_OUT", "CHECK_IN", "MAINTENANCE", "ADJUSTMENT"]
 const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"))
 const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"))
 
 function movementBadgeClass(type: string): string {
   const styles: Record<string, string> = {
-    CHECKOUT: "border-blue-500/30 bg-blue-500/20 text-blue-200",
-    RETURN: "border-emerald-500/30 bg-emerald-500/20 text-emerald-200",
-    TRANSFER: "border-violet-500/30 bg-violet-500/20 text-violet-200",
+    CHECK_OUT: "border-blue-500/30 bg-blue-500/20 text-blue-200",
+    CHECK_IN: "border-emerald-500/30 bg-emerald-500/20 text-emerald-200",
+    MAINTENANCE: "border-violet-500/30 bg-violet-500/20 text-violet-200",
     ADJUSTMENT: "border-amber-500/30 bg-amber-500/20 text-amber-200",
-    KIT_APPLIED: "border-cyan-500/30 bg-cyan-500/20 text-cyan-200",
   }
 
   return styles[type] || "border-[#2B2B30] bg-[#171A22] text-gray-200"
@@ -177,6 +178,7 @@ export default function InventoryMovementsPage() {
   const [items, setItems] = useState<InventoryMovement[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [searchQuery, setSearchQuery] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
@@ -184,6 +186,7 @@ export default function InventoryMovementsPage() {
   const [eventFilter, setEventFilter] = useState("all")
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
+  const [reloadTick, setReloadTick] = useState(0)
 
   const hasAccess = canAccessInventory(user, currentOrg?.id)
 
@@ -195,13 +198,14 @@ export default function InventoryMovementsPage() {
       }
 
       setIsLoading(true)
+      setLoadError(null)
 
       try {
         const [movements, assetsResponse] = await Promise.all([
           listMovements(currentOrg.id, {
             limit: 500,
             offset: 0,
-            type: typeFilter !== "all" ? typeFilter : undefined,
+            movementType: typeFilter !== "all" ? typeFilter : undefined,
             assetId: assetFilter !== "all" ? assetFilter : undefined,
             eventId: eventFilter !== "all" ? eventFilter : undefined,
             from: fromDate || undefined,
@@ -211,23 +215,43 @@ export default function InventoryMovementsPage() {
         ])
         setItems(movements.items)
         setAssets(assetsResponse)
-      } catch {
+      } catch (error) {
         setItems([])
         setAssets([])
+        setLoadError(error instanceof Error ? error.message : "No fue posible cargar movimientos.")
       } finally {
         setIsLoading(false)
       }
     }
 
     void run()
-  }, [assetFilter, currentOrg?.id, eventFilter, fromDate, hasAccess, toDate, typeFilter])
+  }, [assetFilter, currentOrg?.id, eventFilter, fromDate, hasAccess, toDate, typeFilter, reloadTick])
+
+  useEffect(() => {
+    if (!currentOrg?.id) return
+
+    const keys = [
+      queryKeys.movements(currentOrg.id),
+      queryKeys.assets(currentOrg.id),
+      queryKeys.dashboard(currentOrg.id),
+      queryKeys.checklists(currentOrg.id),
+      queryKeys.kits(currentOrg.id),
+      queryKeys.events(currentOrg.id),
+      ["event"],
+      ["eventResources"],
+    ] as Array<readonly unknown[]>
+
+    return subscribeInvalidation(keys, () => {
+      setReloadTick((value) => value + 1)
+    })
+  }, [currentOrg?.id])
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return items
 
     return items.filter((item) => {
-      const source = [item.assetName, item.assetId, item.eventName, item.eventId, item.createdByName, item.type, item.notes]
+      const source = [item.assetName, item.assetId, item.eventName, item.eventId, item.performedBy, item.movementType, item.notes]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -240,7 +264,7 @@ export default function InventoryMovementsPage() {
 
     try {
       const blob = await exportMovementsReport(currentOrg.id, {
-        type: typeFilter !== "all" ? typeFilter : undefined,
+        movementType: typeFilter !== "all" ? typeFilter : undefined,
         assetId: assetFilter !== "all" ? assetFilter : undefined,
         eventId: eventFilter !== "all" ? eventFilter : undefined,
         from: fromDate || undefined,
@@ -285,6 +309,10 @@ export default function InventoryMovementsPage() {
           Exportar Excel
         </Button>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{loadError}</div>
+      ) : null}
 
       <div className="rounded-xl border border-[#1F1F23] bg-[#0F0F12] p-4">
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-7">
@@ -373,12 +401,12 @@ export default function InventoryMovementsPage() {
                   <tr key={item.id} className="border-b border-[#1F1F23] text-gray-300 hover:bg-[#171A22]">
                     <td className="px-4 py-3">{new Date(item.createdAt).toLocaleString("es-CL")}</td>
                     <td className="px-4 py-3">
-                      <Badge className={movementBadgeClass(item.type)}>{item.type}</Badge>
+                      <Badge className={movementBadgeClass(item.movementType)}>{item.movementType}</Badge>
                     </td>
                     <td className="px-4 py-3 text-white">{item.assetName || item.assetId}</td>
                     <td className="px-4 py-3">{item.eventName || item.eventId || "-"}</td>
                     <td className="px-4 py-3">{item.quantity}</td>
-                    <td className="px-4 py-3">{item.createdByName || item.createdBy || "-"}</td>
+                    <td className="px-4 py-3">{item.performedBy || item.performedByUserId || "-"}</td>
                     <td className="px-4 py-3">{item.notes || "-"}</td>
                   </tr>
                 ))

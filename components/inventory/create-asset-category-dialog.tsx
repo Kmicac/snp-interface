@@ -24,7 +24,8 @@ export interface CreateAssetCategoryPayload {
 interface CreateAssetCategoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreate: (payload: CreateAssetCategoryPayload) => void
+  onCreate: (payload: CreateAssetCategoryPayload) => Promise<boolean | void> | boolean | void
+  isSubmitting?: boolean
 }
 
 const schema = z.object({
@@ -36,6 +37,7 @@ export function CreateAssetCategoryDialog({
   open,
   onOpenChange,
   onCreate,
+  isSubmitting = false,
 }: CreateAssetCategoryDialogProps) {
   const form = useForm<CreateAssetCategoryPayload>({
     resolver: zodResolver(schema),
@@ -53,12 +55,14 @@ export function CreateAssetCategoryDialog({
 
   const firstError = Object.values(form.formState.errors)[0]?.message
 
-  const handleSubmit = form.handleSubmit((data) => {
-    onCreate({
+  const handleSubmit = form.handleSubmit(async (data) => {
+    const success = await onCreate({
       ...data,
       description: data.description || undefined,
     })
-    onOpenChange(false)
+    if (success !== false) {
+      onOpenChange(false)
+    }
   })
 
   return (
@@ -94,15 +98,13 @@ export function CreateAssetCategoryDialog({
 
           {firstError && <p className="text-xs text-red-400">{String(firstError)}</p>}
 
-          <p className="text-xs text-gray-500">
-            This only updates local mock data for now. Later this will create records in the real SNP backend.
-          </p>
-
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Add Category</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : "Add Category"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
